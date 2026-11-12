@@ -1,0 +1,7 @@
+# Apps installed from Flathub the first time KantanOS starts with a network connection.
+# One application ID per line.
+org.mozilla.firefox
+org.kde.gwenview
+org.kde.okular
+org.kde.kcalc
+org.videolan.VLC

@@ -1,0 +1,7 @@
+output/
+*.qcow2
+*.iso
+*.raw
+branding/export/
+signing/cosign.key
+__pycache__/

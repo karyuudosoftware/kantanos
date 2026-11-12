@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=KantanOS Welcome
+Comment=Helps you set up KantanOS
+Exec=yafti_gtk.py /usr/share/yafti/yafti.yml
+Icon=kantanos
+Terminal=false
+Type=Application
+X-GNOME-Autostart-enabled=true

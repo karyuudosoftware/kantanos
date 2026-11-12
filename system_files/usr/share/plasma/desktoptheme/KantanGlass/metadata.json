@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "KantanOS"
+            }
+        ],
+        "Description": "Glass panels with large rounded corners; the rest follows Breeze",
+        "Id": "KantanGlass",
+        "License": "CC-BY-SA-4.0",
+        "Name": "Kantan Glass",
+        "Version": "0.1.0"
+    },
+    "X-Plasma-API": "5.0"
+}

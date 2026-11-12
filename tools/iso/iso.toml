@@ -1,0 +1,8 @@
+# Installer settings for the KantanOS ISO.
+# The installer asks for language, keyboard, disk and the first user account.
+
+[customizations.installer.kickstart]
+contents = """
+# Graphical boot with the KantanOS splash on the installed system
+bootloader --append="rhgb quiet"
+"""

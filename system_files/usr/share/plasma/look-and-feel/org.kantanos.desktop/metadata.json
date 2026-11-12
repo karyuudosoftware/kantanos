@@ -1,0 +1,15 @@
+{
+    "KPackageStructure": "Plasma/LookAndFeel",
+    "KPlugin": {
+        "Authors": [
+            { "Name": "KantanOS" }
+        ],
+        "Category": "",
+        "Description": "KantanOS glass desktop: floating dock, slim top bar, dark glass colours",
+        "Id": "org.kantanos.desktop",
+        "License": "GPL-2.0-or-later",
+        "Name": "KantanOS",
+        "Version": "0.1.0"
+    },
+    "X-Plasma-APIVersion": "2"
+}

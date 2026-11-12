@@ -1,0 +1,63 @@
+# Builds KantanOS, signs it and publishes it to the GitHub container registry.
+# Installed PCs check that address once a day and pick the new build up by themselves.
+#
+# Needs one repository secret: SIGNING_SECRET = the contents of signing/cosign.key
+# The published package must be public (or every PC needs a login to pull it).
+name: Build KantanOS
+
+on:
+  schedule:
+    - cron: '30 9 * * *'        # daily, after the Bazzite base has published its own build
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'branding/**', 'tools/vm/**', 'tools/update-test/**']
+  workflow_dispatch:
+
+concurrency:
+  group: build-kantanos
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space (the image is about 13 GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune -af || true
+          df -h /
+
+      - name: Work out the image address
+        run: |
+          . tools/registry.conf
+          echo "KANTAN_IMAGE=${KANTAN_IMAGE:-ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/kantanos}" >> "$GITHUB_ENV"
+          echo "KANTAN_VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+          echo "KANTAN_BUILD=$(date -u +%Y%m%d)" >> "$GITHUB_ENV"
+
+      - name: Build the image
+        run: |
+          sudo podman build \
+            --build-arg KANTAN_VERSION="$KANTAN_VERSION" \
+            --build-arg KANTAN_BUILD="$KANTAN_BUILD" \
+            --build-arg KANTAN_IMAGE="$KANTAN_IMAGE" \
+            -t "$KANTAN_IMAGE:latest" -f Containerfile .
+
+      - name: Log in to the registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Sign and publish
+        env:
+          SIGNING_SECRET: ${{ secrets.SIGNING_SECRET }}
+        run: |
+          test -n "$SIGNING_SECRET" || { echo "The SIGNING_SECRET repository secret is missing"; exit 1; }
+          KEY="$(mktemp)"
+          printf '%s\n' "$SIGNING_SECRET" > "$KEY"
+          sudo KANTAN_IMAGE="$KANTAN_IMAGE" bash tools/publish.sh "$KEY"
+          rm -f "$KEY"

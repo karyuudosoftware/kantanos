@@ -1,0 +1,3 @@
+# Show the graphical boot splash instead of scrolling boot text,
+# also when a serial console is attached (as in the test VM).
+kargs = ["rhgb", "quiet", "plymouth.ignore-serial-consoles"]

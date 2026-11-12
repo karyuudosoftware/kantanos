@@ -1,0 +1,31 @@
+#!/usr/bin/bash
+# kantan-app status|install|uninstall <flatpak-id>
+# Small helper used by KantanOS Welcome to manage apps from Flathub.
+action="${1:-}"; app="${2:-}"
+if [ -z "$action" ] || [ -z "$app" ]; then
+    echo "usage: kantan-app status|install|uninstall <flatpak-id>"; exit 2
+fi
+
+pause() { echo; echo "Press Enter to close..."; read -r _; }
+
+case "$action" in
+    status)
+        # Prints the id of the option that matches the current state.
+        if flatpak info "$app" >/dev/null 2>&1; then echo install; else echo uninstall; fi
+        ;;
+    install)
+        echo "Installing $app from Flathub..."
+        flatpak install --system --noninteractive --or-update flathub "$app"; rc=$?
+        [ $rc = 0 ] && echo "Done." || echo "Installation failed (code $rc)."
+        pause; exit $rc
+        ;;
+    uninstall)
+        echo "Removing $app..."
+        flatpak uninstall --system --noninteractive "$app"; rc=$?
+        [ $rc = 0 ] && echo "Done." || echo "Removal failed (code $rc)."
+        pause; exit $rc
+        ;;
+    *)
+        echo "unknown action: $action"; exit 2
+        ;;
+esac

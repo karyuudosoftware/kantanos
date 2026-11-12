@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KantanOS Logo Concepts</title>
+<style>
+  :root {
+    --page: #0b0e17;
+    --ink: #e8ecf6;
+    --muted: #8a93a8;
+    --dark-card: #121726;
+    --light-card: #f3f5fa;
+    --line: #262d42;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--ink);
+    font-family: "Segoe UI", Inter, system-ui, sans-serif;
+    padding: 32px 16px 48px;
+  }
+  h1 { font-weight: 600; font-size: 22px; margin: 0 auto 4px; max-width: 1100px; }
+  p.lead { color: var(--muted); margin: 0 auto 28px; max-width: 1100px; font-size: 14px; }
+  .concept { max-width: 1100px; margin: 0 auto 36px; }
+  .concept h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  .concept p { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card {
+    border-radius: 18px; min-height: 230px; display: flex;
+    align-items: center; justify-content: center; padding: 24px;
+    border: 1px solid var(--line); overflow: hidden;
+  }
+  .card.dark { background: radial-gradient(120% 120% at 20% 0%, #1b2440 0%, var(--dark-card) 60%); }
+  .card.light { background: radial-gradient(120% 120% at 20% 0%, #ffffff 0%, var(--light-card) 60%); border-color: #dfe3ee; }
+  svg { max-width: 100%; height: auto; }
+  .light .word { fill: #141a2b; }
+  .light .tag { fill: #5d667c; }
+  .dark .word { fill: #f2f5fc; }
+  .dark .tag { fill: #9aa3b8; }
+  @media (max-width: 720px) { .pair { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<h1>KantanOS logo concepts</h1>
+<p class="lead">Three directions, each shown on dark and light. All use 簡単 and the "Built with Claude" line. Colours and fonts can be changed.</p>
+
+<!-- Shared definitions -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="kGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#38d9f5"/>
+      <stop offset="0.5" stop-color="#6c7bff"/>
+      <stop offset="1" stop-color="#a55cff"/>
+    </linearGradient>
+    <linearGradient id="glassEdge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.85"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.15"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.55"/>
+    </linearGradient>
+    <linearGradient id="glassFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.08"/>
+    </linearGradient>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="14"/></filter>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#2a1f6b" flood-opacity="0.35"/>
+    </filter>
+    <clipPath id="squircle"><rect x="0" y="0" width="128" height="128" rx="34"/></clipPath>
+
+    <!-- Glass app icon with stacked 簡 / 単 -->
+    <g id="icon">
+      <g filter="url(#shadow)">
+        <g clip-path="url(#squircle)">
+          <rect width="128" height="128" fill="#5a63e8"/>
+          <circle cx="30" cy="28" r="46" fill="#38d9f5" filter="url(#soft)"/>
+          <circle cx="104" cy="104" r="50" fill="#a55cff" filter="url(#soft)"/>
+          <circle cx="96" cy="22" r="26" fill="#7f9bff" filter="url(#soft)"/>
+          <rect width="128" height="128" fill="url(#glassFill)"/>
+          <ellipse cx="44" cy="10" rx="70" ry="22" fill="#ffffff" opacity="0.18"/>
+        </g>
+        <rect x="0.75" y="0.75" width="126.5" height="126.5" rx="33.5" fill="none" stroke="url(#glassEdge)" stroke-width="1.5"/>
+      </g>
+      <text x="64" y="58" text-anchor="middle" font-family="'Noto Sans JP','Yu Gothic UI','Yu Gothic','Meiryo',sans-serif" font-weight="700" font-size="44" fill="#ffffff">簡</text>
+      <text x="64" y="108" text-anchor="middle" font-family="'Noto Sans JP','Yu Gothic UI','Yu Gothic','Meiryo',sans-serif" font-weight="700" font-size="44" fill="#ffffff">単</text>
+    </g>
+  </defs>
+</svg>
+
+<!-- Concept A -->
+<section class="concept">
+  <h2>A · Glass icon + wordmark</h2>
+  <p>A frosted-glass app icon with 簡 and 単 stacked, matching the dock style. The icon also works by itself as the dock, boot and login icon.</p>
+  <div class="pair">
+    <div class="card dark">
+      <svg viewBox="0 0 470 150" width="470" role="img" aria-label="KantanOS, Built with Claude">
+        <use href="#icon" x="8" y="11"/>
+        <text class="word" x="164" y="86" font-family="'Segoe UI Variable Display','Segoe UI',Inter,system-ui,sans-serif" font-size="54" letter-spacing="-0.5"><tspan font-weight="700">Kantan</tspan><tspan font-weight="300">OS</tspan></text>
+        <text class="tag" x="167" y="117" font-family="'Segoe UI',Inter,system-ui,sans-serif" font-size="14" font-weight="400" letter-spacing="2.2">Built with Claude</text>
+      </svg>
+    </div>
+    <div class="card light">
+      <svg viewBox="0 0 470 150" width="470" role="img" aria-label="KantanOS, Built with Claude">
+        <use href="#icon" x="8" y="11"/>
+        <text class="word" x="164" y="86" font-family="'Segoe UI Variable Display','Segoe UI',Inter,system-ui,sans-serif" font-size="54" letter-spacing="-0.5"><tspan font-weight="700">Kantan</tspan><tspan font-weight="300">OS</tspan></text>
+        <text class="tag" x="167" y="117" font-family="'Segoe UI',Inter,system-ui,sans-serif" font-size="14" font-weight="400" letter-spacing="2.2">Built with Claude</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- Concept B -->
+<section class="concept">
+  <h2>B · Stacked centred (boot and login screen)</h2>
+  <p>A large gradient 簡単 is the hero. KantanOS and the credit line sit underneath. Made for the boot splash and the mode-chooser login screen.</p>
+  <div class="pair">
+    <div class="card dark">
+      <svg viewBox="0 0 360 230" width="360" role="img" aria-label="簡単 KantanOS, Built with Claude">
+        <ellipse cx="180" cy="78" rx="120" ry="44" fill="url(#kGrad)" opacity="0.28" filter="url(#soft)"/>
+        <text x="180" y="112" text-anchor="middle" font-family="'Noto Sans JP','Yu Gothic UI','Yu Gothic','Meiryo',sans-serif" font-weight="700" font-size="96" fill="url(#kGrad)" letter-spacing="4">簡単</text>
+        <text class="word" x="180" y="166" text-anchor="middle" font-family="'Segoe UI Variable Display','Segoe UI',Inter,system-ui,sans-serif" font-size="34" letter-spacing="0.5"><tspan font-weight="600">Kantan</tspan><tspan font-weight="300">OS</tspan></text>
+        <line x1="150" y1="184" x2="210" y2="184" stroke="url(#kGrad)" stroke-width="1.5" opacity="0.8"/>
+        <text class="tag" x="180" y="206" text-anchor="middle" font-family="'Segoe UI',Inter,system-ui,sans-serif" font-size="12.5" letter-spacing="2.4">Built with Claude</text>
+      </svg>
+    </div>
+    <div class="card light">
+      <svg viewBox="0 0 360 230" width="360" role="img" aria-label="簡単 KantanOS, Built with Claude">
+        <ellipse cx="180" cy="78" rx="120" ry="44" fill="url(#kGrad)" opacity="0.18" filter="url(#soft)"/>
+        <text x="180" y="112" text-anchor="middle" font-family="'Noto Sans JP','Yu Gothic UI','Yu Gothic','Meiryo',sans-serif" font-weight="700" font-size="96" fill="url(#kGrad)" letter-spacing="4">簡単</text>
+        <text class="word" x="180" y="166" text-anchor="middle" font-family="'Segoe UI Variable Display','Segoe UI',Inter,system-ui,sans-serif" font-size="34" letter-spacing="0.5"><tspan font-weight="600">Kantan</tspan><tspan font-weight="300">OS</tspan></text>
+        <line x1="150" y1="184" x2="210" y2="184" stroke="url(#kGrad)" stroke-width="1.5" opacity="0.8"/>
+        <text class="tag" x="180" y="206" text-anchor="middle" font-family="'Segoe UI',Inter,system-ui,sans-serif" font-size="12.5" letter-spacing="2.4">Built with Claude</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- Concept C -->
+<section class="concept">
+  <h2>C · Wordmark with glass kanji badge</h2>
+  <p>A clean wordmark with a small glass pill holding 簡単, like a modern seal. Good for the top bar, the About page and the installer.</p>
+  <div class="pair">
+    <div class="card dark">
+      <svg viewBox="0 0 460 140" width="460" role="img" aria-label="KantanOS 簡単, Built with Claude">
+        <text class="word" x="20" y="80" font-family="'Segoe UI Variable Display','Segoe UI',Inter,system-ui,sans-serif" font-size="58" letter-spacing="-0.8"><tspan font-weight="700">Kantan</tspan><tspan font-weight="300">OS</tspan></text>
+        <g transform="translate(330,34)">
+          <rect width="104" height="52" rx="26" fill="url(#kGrad)" opacity="0.9"/>
+          <rect width="104" height="52" rx="26" fill="url(#glassFill)"/>
+          <rect x="0.75" y="0.75" width="102.5" height="50.5" rx="25.25" fill="none" stroke="url(#glassEdge)" stroke-width="1.5"/>
+          <text x="52" y="36" text-anchor="middle" font-family="'Noto Sans JP','Yu Gothic UI','Yu Gothic','Meiryo',sans-serif" font-weight="700" font-size="28" fill="#ffffff" letter-spacing="2">簡単</text>
+        </g>
+        <text class="tag" x="23" y="112" font-family="'Segoe UI',Inter,system-ui,sans-serif" font-size="14" letter-spacing="2.2">Built with Claude</text>
+      </svg>
+    </div>
+    <div class="card light">
+      <svg viewBox="0 0 460 140" width="460" role="img" aria-label="KantanOS 簡単, Built with Claude">
+        <text class="word" x="20" y="80" font-family="'Segoe UI Variable Display','Segoe UI',Inter,system-ui,sans-serif" font-size="58" letter-spacing="-0.8"><tspan font-weight="700">Kantan</tspan><tspan font-weight="300">OS</tspan></text>
+        <g transform="translate(330,34)">
+          <rect width="104" height="52" rx="26" fill="url(#kGrad)" opacity="0.9"/>
+          <rect width="104" height="52" rx="26" fill="url(#glassFill)"/>
+          <rect x="0.75" y="0.75" width="102.5" height="50.5" rx="25.25" fill="none" stroke="url(#glassEdge)" stroke-width="1.5"/>
+          <text x="52" y="36" text-anchor="middle" font-family="'Noto Sans JP','Yu Gothic UI','Yu Gothic','Meiryo',sans-serif" font-weight="700" font-size="28" fill="#ffffff" letter-spacing="2">簡単</text>
+        </g>
+        <text class="tag" x="23" y="112" font-family="'Segoe UI',Inter,system-ui,sans-serif" font-size="14" letter-spacing="2.2">Built with Claude</text>
+      </svg>
+    </div>
+  </div>
+</section>
+</body>
+</html>

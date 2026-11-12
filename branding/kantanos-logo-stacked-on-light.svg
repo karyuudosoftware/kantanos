@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 230" width="720" height="460" role="img" aria-label="簡単 KantanOS, Built with Claude">
+  <title>簡単 KantanOS — Built with Claude</title>
+  <defs><linearGradient id="kGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38d9f5"/><stop offset="0.5" stop-color="#6c7bff"/><stop offset="1" stop-color="#a55cff"/></linearGradient><filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="14"/></filter></defs>
+  <ellipse cx="180" cy="78" rx="120" ry="44" fill="url(#kGrad)" opacity="0.18" filter="url(#glow)"/>
+  <text x="180" y="112" text-anchor="middle" font-family="'Noto Sans CJK JP','Noto Sans JP','Yu Gothic UI',sans-serif" font-weight="700" font-size="96" fill="url(#kGrad)" letter-spacing="4">簡単</text>
+  <text x="180" y="166" text-anchor="middle" font-family="'Inter Variable',Inter,'Segoe UI',sans-serif" font-size="34" letter-spacing="0.5" fill="#141a2b"><tspan font-weight="600">Kantan</tspan><tspan font-weight="300">OS</tspan></text>
+  <line x1="150" y1="184" x2="210" y2="184" stroke="url(#kGrad)" stroke-width="1.5" opacity="0.8"/>
+  <text x="180" y="206" text-anchor="middle" font-family="'Inter Variable',Inter,'Segoe UI',sans-serif" font-size="12.5" letter-spacing="2.4" fill="#5d667c">Built with Claude</text>
+</svg>

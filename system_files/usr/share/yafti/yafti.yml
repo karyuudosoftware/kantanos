@@ -1,0 +1,238 @@
+title: KantanOS Welcome
+screens:
+  - title: "Welcome!"
+    description: "Get started with KantanOS"
+    hidden: true
+    actions:
+      - id: "store"
+        title: "Open the app store"
+        description: "Browse and install thousands of apps."
+        default: false
+        script: "nohup setsid gtk4-launch io.github.kolunmi.Bazaar >&/dev/null"
+      - id: "japanese"
+        title: "Type in Japanese"
+        description: "Japanese input is already installed. Press Ctrl+Space in any text box to switch between English and Japanese."
+        default: false
+        script: "nohup setsid fcitx5-configtool >&/dev/null"
+      - id: "update"
+        title: "Check for updates"
+        description: "Update KantanOS and your apps. A restart applies system updates; the previous version stays available as a fallback."
+        default: false
+        script: "ujust update; echo; echo \"Press Enter to close...\"; read -r _"
+      - id: "about"
+        title: "About this PC"
+        description: "Show the KantanOS version and system details."
+        default: false
+        script: "nohup setsid kinfocenter >&/dev/null"
+  - title: "Office"
+    description: "Documents, notes and email"
+    actions:
+      - id: "libreoffice"
+        title: "LibreOffice"
+        description: "Word processor, spreadsheets and presentations. Opens and saves Microsoft Office files."
+        default: false
+        status_script: "kantan-app status org.libreoffice.LibreOffice"
+        options:
+          - id: "install"
+            label: "Install LibreOffice"
+            script: "kantan-app install org.libreoffice.LibreOffice"
+          - id: "uninstall"
+            label: "Remove LibreOffice"
+            script: "kantan-app uninstall org.libreoffice.LibreOffice"
+      - id: "notepadnext"
+        title: "NotepadNext"
+        description: "A Notepad++ style text editor that runs natively."
+        default: false
+        status_script: "kantan-app status com.github.dail8859.NotepadNext"
+        options:
+          - id: "install"
+            label: "Install NotepadNext"
+            script: "kantan-app install com.github.dail8859.NotepadNext"
+          - id: "uninstall"
+            label: "Remove NotepadNext"
+            script: "kantan-app uninstall com.github.dail8859.NotepadNext"
+      - id: "thunderbird"
+        title: "Thunderbird"
+        description: "Email and calendar."
+        default: false
+        status_script: "kantan-app status org.mozilla.Thunderbird"
+        options:
+          - id: "install"
+            label: "Install Thunderbird"
+            script: "kantan-app install org.mozilla.Thunderbird"
+          - id: "uninstall"
+            label: "Remove Thunderbird"
+            script: "kantan-app uninstall org.mozilla.Thunderbird"
+  - title: "Creative"
+    description: "Photos, drawing, video and audio"
+    actions:
+      - id: "krita"
+        title: "Krita"
+        description: "Digital painting and drawing."
+        default: false
+        status_script: "kantan-app status org.kde.krita"
+        options:
+          - id: "install"
+            label: "Install Krita"
+            script: "kantan-app install org.kde.krita"
+          - id: "uninstall"
+            label: "Remove Krita"
+            script: "kantan-app uninstall org.kde.krita"
+      - id: "gimp"
+        title: "GIMP"
+        description: "Photo editing."
+        default: false
+        status_script: "kantan-app status org.gimp.GIMP"
+        options:
+          - id: "install"
+            label: "Install GIMP"
+            script: "kantan-app install org.gimp.GIMP"
+          - id: "uninstall"
+            label: "Remove GIMP"
+            script: "kantan-app uninstall org.gimp.GIMP"
+      - id: "inkscape"
+        title: "Inkscape"
+        description: "Vector illustration."
+        default: false
+        status_script: "kantan-app status org.inkscape.Inkscape"
+        options:
+          - id: "install"
+            label: "Install Inkscape"
+            script: "kantan-app install org.inkscape.Inkscape"
+          - id: "uninstall"
+            label: "Remove Inkscape"
+            script: "kantan-app uninstall org.inkscape.Inkscape"
+      - id: "kdenlive"
+        title: "Kdenlive"
+        description: "Video editing."
+        default: false
+        status_script: "kantan-app status org.kde.kdenlive"
+        options:
+          - id: "install"
+            label: "Install Kdenlive"
+            script: "kantan-app install org.kde.kdenlive"
+          - id: "uninstall"
+            label: "Remove Kdenlive"
+            script: "kantan-app uninstall org.kde.kdenlive"
+      - id: "darktable"
+        title: "darktable"
+        description: "Photo library and RAW developing."
+        default: false
+        status_script: "kantan-app status org.darktable.Darktable"
+        options:
+          - id: "install"
+            label: "Install darktable"
+            script: "kantan-app install org.darktable.Darktable"
+          - id: "uninstall"
+            label: "Remove darktable"
+            script: "kantan-app uninstall org.darktable.Darktable"
+      - id: "audacity"
+        title: "Audacity"
+        description: "Audio recording and editing."
+        default: false
+        status_script: "kantan-app status org.audacityteam.Audacity"
+        options:
+          - id: "install"
+            label: "Install Audacity"
+            script: "kantan-app install org.audacityteam.Audacity"
+          - id: "uninstall"
+            label: "Remove Audacity"
+            script: "kantan-app uninstall org.audacityteam.Audacity"
+      - id: "blender"
+        title: "Blender"
+        description: "3D modelling and animation."
+        default: false
+        status_script: "kantan-app status org.blender.Blender"
+        options:
+          - id: "install"
+            label: "Install Blender"
+            script: "kantan-app install org.blender.Blender"
+          - id: "uninstall"
+            label: "Remove Blender"
+            script: "kantan-app uninstall org.blender.Blender"
+      - id: "artcraft"
+        title: "ArtCraft"
+        description: "Free creative and office apps (still in development). Opens the ArtCraft website, where you can get its launcher."
+        default: false
+        script: "xdg-open https://getartcraft.com/"
+  - title: "Media & Chat"
+    description: "Players and messaging"
+    actions:
+      - id: "vlc"
+        title: "VLC"
+        description: "Plays almost any video or audio file."
+        default: false
+        status_script: "kantan-app status org.videolan.VLC"
+        options:
+          - id: "install"
+            label: "Install VLC"
+            script: "kantan-app install org.videolan.VLC"
+          - id: "uninstall"
+            label: "Remove VLC"
+            script: "kantan-app uninstall org.videolan.VLC"
+      - id: "haruna"
+        title: "Haruna"
+        description: "A simple, modern video player."
+        default: false
+        status_script: "kantan-app status org.kde.haruna"
+        options:
+          - id: "install"
+            label: "Install Haruna"
+            script: "kantan-app install org.kde.haruna"
+          - id: "uninstall"
+            label: "Remove Haruna"
+            script: "kantan-app uninstall org.kde.haruna"
+      - id: "elisa"
+        title: "Elisa"
+        description: "Music player."
+        default: false
+        status_script: "kantan-app status org.kde.elisa"
+        options:
+          - id: "install"
+            label: "Install Elisa"
+            script: "kantan-app install org.kde.elisa"
+          - id: "uninstall"
+            label: "Remove Elisa"
+            script: "kantan-app uninstall org.kde.elisa"
+      - id: "signal"
+        title: "Signal"
+        description: "Private messaging."
+        default: false
+        status_script: "kantan-app status org.signal.Signal"
+        options:
+          - id: "install"
+            label: "Install Signal"
+            script: "kantan-app install org.signal.Signal"
+          - id: "uninstall"
+            label: "Remove Signal"
+            script: "kantan-app uninstall org.signal.Signal"
+      - id: "desktop"
+        title: "Telegram"
+        description: "Messaging."
+        default: false
+        status_script: "kantan-app status org.telegram.desktop"
+        options:
+          - id: "install"
+            label: "Install Telegram"
+            script: "kantan-app install org.telegram.desktop"
+          - id: "uninstall"
+            label: "Remove Telegram"
+            script: "kantan-app uninstall org.telegram.desktop"
+  - title: "Display & Sound"
+    description: "HDR and surround sound"
+    actions:
+      - id: "hdr-on"
+        title: "Turn HDR on"
+        description: "Enables HDR and wide colour on every connected display that supports it."
+        default: false
+        script: "ujust kantan-hdr-on; echo; echo \"Press Enter to close...\"; read -r _"
+      - id: "hdr-off"
+        title: "Turn HDR off"
+        description: "Switches every display back to standard colour."
+        default: false
+        script: "ujust kantan-hdr-off; echo; echo \"Press Enter to close...\"; read -r _"
+      - id: "audio-71"
+        title: "Use 7.1 surround over HDMI"
+        description: "For an AV receiver. Turn the receiver on first. Heights are added by the receiver's upmixer."
+        default: false
+        script: "ujust kantan-audio-71; echo; echo \"Press Enter to close...\"; read -r _"

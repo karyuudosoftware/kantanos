@@ -1,0 +1,19 @@
+#!/usr/bin/python3
+"""Sanity check for the KantanOS Welcome definition (used by tools/verify-image.sh)."""
+import sys, yaml
+
+doc = yaml.safe_load(open("/usr/share/yafti/yafti.yml", encoding="utf-8"))
+problems = []
+if doc.get("title") != "KantanOS Welcome":
+    problems.append("wrong title")
+for screen in doc.get("screens", []):
+    for action in screen.get("actions", []):
+        if not action.get("script") and not action.get("options"):
+            problems.append(f"{action.get('id')}: no script or options")
+        for opt in action.get("options", []):
+            if not opt.get("script"):
+                problems.append(f"{action.get('id')}/{opt.get('id')}: no script")
+if len(doc.get("screens", [])) < 4:
+    problems.append("too few screens")
+print("\n".join(problems) or "ok")
+sys.exit(1 if problems else 0)

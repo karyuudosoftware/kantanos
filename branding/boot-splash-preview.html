@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>KantanOS Boot Splash</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: radial-gradient(90% 90% at 50% 40%, #182038 0%, #0b0e17 70%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    overflow: hidden;
+  }
+  img { width: 640px; height: auto; margin-top: -60px; }
+  .dots { display: flex; gap: 14px; margin-top: 48px; }
+  .dots span { width: 10px; height: 10px; border-radius: 50%; background: #6c7bff; opacity: .35; }
+  .dots span:nth-child(1) { background: #38d9f5; opacity: .9; }
+  .dots span:nth-child(2) { opacity: .6; }
+  .dots span:nth-child(3) { background: #a55cff; opacity: .35; }
+</style>
+</head>
+<body>
+  <img src="kantanos-logo-stacked-on-dark.svg" alt="簡単 KantanOS, Built with Claude">
+  <div class="dots"><span></span><span></span><span></span></div>
+</body>
+</html>

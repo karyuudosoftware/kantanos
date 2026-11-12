@@ -1,0 +1,10 @@
+{
+    "KPlugin": {
+        "Authors": [
+            { "Name": "KantanOS" }
+        ],
+        "Id": "KantanOS",
+        "License": "CC-BY-SA-4.0",
+        "Name": "KantanOS Glass"
+    }
+}

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-14 -10 156 156" width="512" height="512" role="img" aria-label="KantanOS icon">
+  <title>KantanOS</title>
+  <defs>
+    <linearGradient id="glassEdge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.85"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.15"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.55"/>
+    </linearGradient>
+    <linearGradient id="glassFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0.08"/>
+    </linearGradient>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="14"/></filter>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#2a1f6b" flood-opacity="0.35"/>
+    </filter>
+    <clipPath id="squircle"><rect x="0" y="0" width="128" height="128" rx="34"/></clipPath>
+  </defs>
+  <g filter="url(#shadow)">
+    <g clip-path="url(#squircle)">
+      <rect width="128" height="128" fill="#5a63e8"/>
+      <circle cx="30" cy="28" r="46" fill="#38d9f5" filter="url(#soft)"/>
+      <circle cx="104" cy="104" r="50" fill="#a55cff" filter="url(#soft)"/>
+      <circle cx="96" cy="22" r="26" fill="#7f9bff" filter="url(#soft)"/>
+      <rect width="128" height="128" fill="url(#glassFill)"/>
+      <ellipse cx="44" cy="10" rx="70" ry="22" fill="#ffffff" opacity="0.18"/>
+    </g>
+    <rect x="0.75" y="0.75" width="126.5" height="126.5" rx="33.5" fill="none" stroke="url(#glassEdge)" stroke-width="1.5"/>
+  </g>
+  <text x="64" y="58" text-anchor="middle" font-family="'Noto Sans CJK JP','Noto Sans JP','Yu Gothic UI',sans-serif" font-weight="700" font-size="44" fill="#ffffff">簡</text>
+  <text x="64" y="108" text-anchor="middle" font-family="'Noto Sans CJK JP','Noto Sans JP','Yu Gothic UI',sans-serif" font-weight="700" font-size="44" fill="#ffffff">単</text>
+</svg>

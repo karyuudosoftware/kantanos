@@ -1,0 +1,28 @@
+#!/usr/bin/bash
+# Installs the KantanOS starter apps from Flathub once. Safe to re-run: it retries until
+# every app in the list is installed, then leaves a marker so it never runs again.
+set -u
+LIST=/usr/share/kantanos/flatpaks.list
+MARK=/var/lib/kantanos/flatpaks-installed
+mkdir -p /var/lib/kantanos
+
+flatpak remote-add --if-not-exists --system flathub https://dl.flathub.org/repo/flathub.flatpakrepo || true
+flatpak remote-modify --system --enable flathub || true
+
+failed=0
+while read -r app; do
+    case "$app" in ''|'#'*) continue ;; esac
+    if flatpak info --system "$app" >/dev/null 2>&1; then
+        continue
+    fi
+    echo "Installing $app"
+    flatpak install --system --noninteractive --or-update flathub "$app" || failed=1
+done < "$LIST"
+
+if [ "$failed" = 0 ]; then
+    touch "$MARK"
+    echo "All starter apps are installed."
+else
+    echo "Some apps could not be installed; will retry."
+    exit 1
+fi

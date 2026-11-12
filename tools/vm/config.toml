@@ -1,0 +1,6 @@
+# TEST VM ONLY — a throwaway local account so the VM can be logged in to.
+# Never use this file for an image that goes on a real machine.
+[[customizations.user]]
+name = "kantan"
+password = "kantan"
+groups = ["wheel"]

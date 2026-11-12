@@ -1,0 +1,15 @@
+[General]
+# File manager defaults that feel familiar coming from Windows Explorer.
+GlobalViewProps=true
+ShowFullPath=true
+ShowFullPathInTitlebar=true
+BrowseThroughArchives=true
+RememberOpenedTabs=false
+ShowStatusBar=FullWidth
+
+[DetailsMode]
+PreviewSize=22
+ExpandableFolders=false
+
+[PreviewSettings]
+Plugins=appimagethumbnail,audiothumbnail,comicbookthumbnail,djvuthumbnail,ebookthumbnail,exrthumbnail,imagethumbnail,jpegthumbnail,kraorathumbnail,opendocumentthumbnail,svgthumbnail,windowsexethumbnail,windowsimagethumbnail,ffmpegthumbs
