@@ -1,0 +1,77 @@
+#!/usr/bin/bash
+# Sets up the file manager sidebar for this user, once: an Explorer-style list
+# (Home, Desktop, Downloads, Documents, Pictures, Music, Videos, Programs, Trash).
+# Runs at the start of every desktop session; does nothing if the user already has a
+# sidebar file (so their own changes are never overwritten).
+set -u
+PLACES="${XDG_DATA_HOME:-$HOME/.local/share}/user-places.xbel"
+[ -e "$PLACES" ] && exit 0
+
+xdg-user-dirs-update 2>/dev/null || true
+home="$(realpath "$HOME")"
+stamp="$(date +%s)"
+n=0
+
+esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' <<<"$1"; }
+url() { python3 -c 'import sys, urllib.parse; print("file://" + urllib.parse.quote(sys.argv[1]))' "$1"; }
+
+entry() {   # entry <href> <title> <icon>
+    cat <<XML
+ <bookmark href="$(esc "$1")">
+  <title>$(esc "$2")</title>
+  <info>
+   <metadata owner="http://freedesktop.org">
+    <bookmark:icon name="$3"/>
+   </metadata>
+   <metadata owner="http://www.kde.org">
+    <ID>$stamp/$n</ID>
+    <isSystemItem>true</isSystemItem>
+   </metadata>
+  </info>
+ </bookmark>
+XML
+    n=$((n + 1))
+}
+
+folder() {  # folder <XDG name> <icon>   (titled with the folder's own, localised, name)
+    local dir
+    dir="$(xdg-user-dir "$1" 2>/dev/null)"
+    [ -n "$dir" ] && [ "$dir" != "$HOME" ] && [ -d "$dir" ] || return 0
+    dir="$(realpath "$dir")"
+    entry "$(url "$dir")" "$(basename "$dir")" "$2"
+}
+
+mkdir -p "$(dirname "$PLACES")"
+{
+cat <<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xbel>
+<xbel xmlns:bookmark="http://www.freedesktop.org/standards/desktop-bookmarks" xmlns:kdepriv="http://www.kde.org/kdepriv" xmlns:mime="http://www.freedesktop.org/standards/shared-mime-info">
+ <info>
+  <metadata owner="http://www.kde.org">
+   <kde_places_version>4</kde_places_version>
+   <GroupState-Places-IsHidden>false</GroupState-Places-IsHidden>
+   <GroupState-Remote-IsHidden>false</GroupState-Remote-IsHidden>
+   <GroupState-Devices-IsHidden>false</GroupState-Devices-IsHidden>
+   <GroupState-RemovableDevices-IsHidden>false</GroupState-RemovableDevices-IsHidden>
+   <GroupState-Tags-IsHidden>true</GroupState-Tags-IsHidden>
+   <withRecentlyUsed>true</withRecentlyUsed>
+   <GroupState-RecentlySaved-IsHidden>false</GroupState-RecentlySaved-IsHidden>
+   <withBaloo>true</withBaloo>
+   <GroupState-SearchFor-IsHidden>true</GroupState-SearchFor-IsHidden>
+  </metadata>
+ </info>
+XML
+entry "$(url "$home")" "Home" "user-home"
+folder DESKTOP   user-desktop
+folder DOWNLOAD  folder-downloads
+folder DOCUMENTS folder-documents
+folder PICTURES  folder-pictures
+folder MUSIC     folder-music
+folder VIDEOS    folder-videos
+entry "applications:/" "Programs" "applications-all"
+entry "trash:/" "Trash" "user-trash"
+entry "remote:/" "Network" "folder-network"
+entry "recentlyused:/files" "Recent" "document-open-recent"
+echo "</xbel>"
+} > "$PLACES.tmp" && mv "$PLACES.tmp" "$PLACES"

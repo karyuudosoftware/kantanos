@@ -6,7 +6,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/../image-ref.sh"   # LOCAL_IMAGE: the update address when set, else localhost/kantanos
 OUT=/root/kantan-iso
 rm -rf "$OUT" && mkdir -p "$OUT"
-cp "$HERE/iso.toml" "$OUT/config.toml"
+bash "$HERE/make-iso-config.sh" "$OUT/config.toml"
 podman run --rm --privileged --pull=newer \
     --security-opt label=type:unconfined_t \
     -v "$OUT":/output \

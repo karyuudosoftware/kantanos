@@ -1,0 +1,13 @@
+[General]
+count=1
+rules=kantanos-files
+
+[kantanos-files]
+Description=File manager opens at a comfortable size
+wmclass=dolphin
+wmclassmatch=2
+types=1
+size=1280,820
+sizerule=3
+placement=5
+placementrule=2

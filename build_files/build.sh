@@ -92,6 +92,13 @@ for f in /usr/bin/yafti_gtk.py /usr/share/applications/io.github.ublue_os.yafti_
 done
 sed -i -e '/^Name\[/d' -e '/^Comment\[/d' -e 's|^Keywords=.*|Keywords=kantanos;welcome;setup;apps;|' /usr/share/applications/io.github.ublue_os.yafti_gtk.desktop
 
+# The file manager is simply called "Files" in menus and on the dock (English name only;
+# other languages keep their own translation). Its Explorer-style layout comes from
+# system_files: dolphinrc, the toolbar definition and saved layout in /etc/skel, a window
+# rule for its opening size, and files-setup for the sidebar.
+sed -i -e 's|^Name=Dolphin$|Name=Files|' -e 's|^GenericName=File Manager$|GenericName=File Manager (Dolphin)|' \
+    /usr/share/applications/org.kde.dolphin.desktop
+
 # Starter apps (browser, viewers, media player) are installed on first boot.
 systemctl enable kantanos-flatpak-setup.service
 

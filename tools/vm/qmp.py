@@ -74,6 +74,19 @@ def main():
         for down in (True, False):
             q.cmd("input-send-event", events=[{"type": "btn", "data": {"down": down, "button": "left"}}])
             time.sleep(0.1)
+    elif op == "drag":   # drag x1 y1 x2 y2
+        x1, y1, x2, y2 = (int(v) for v in sys.argv[2:6])
+        def move(x, y):
+            q.cmd("input-send-event", events=[
+                {"type": "abs", "data": {"axis": "x", "value": x * 32767 // 1920}},
+                {"type": "abs", "data": {"axis": "y", "value": y * 32767 // 1080}}])
+            time.sleep(0.08)
+        move(x1, y1); time.sleep(0.2)
+        q.cmd("input-send-event", events=[{"type": "btn", "data": {"down": True, "button": "left"}}])
+        for i in range(1, 11):
+            move(x1 + (x2 - x1) * i // 10, y1 + (y2 - y1) * i // 10)
+        time.sleep(0.2)
+        q.cmd("input-send-event", events=[{"type": "btn", "data": {"down": False, "button": "left"}}])
     elif op == "quit":
         q.cmd("system_powerdown")
     else:

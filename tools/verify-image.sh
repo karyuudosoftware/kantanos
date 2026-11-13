@@ -38,9 +38,16 @@ check "Steam does not autostart"            "test ! -e /etc/skel/.config/autosta
 check "welcome app is KantanOS"             "grep -q KantanOS /usr/share/yafti/yafti.yml && grep -q KantanOS /usr/bin/yafti_gtk.py && ! grep -q -i bazzite /usr/share/yafti/yafti.yml"
 check "welcome definition is valid YAML"    "python3 /usr/libexec/kantanos/check-welcome"
 check "kantan-app helper works"             "kantan-app status org.example.Nothing | grep -q uninstall"
-check "file manager defaults present"       "grep -q ShowFullPath=true /etc/xdg/dolphinrc"
+check "file manager defaults present"       "grep -q ShowFullPath=false /etc/xdg/dolphinrc"
 check "file permissions sane"               "test \$(stat -c %a /etc/xdg/kwinrc) = 644"
-check "daily update timer enabled"          "systemctl is-enabled uupd.timer"
+check "file manager toolbar layout present" "grep -q commandToolBar /etc/skel/.local/share/kxmlgui5/dolphin/dolphinui.rc"
+check "file manager saved layout present"  "grep -q ^State= /etc/skel/.local/state/dolphinstaterc"
+check "file manager sidebar setup runs"    "test -x /usr/libexec/kantanos/files-setup && grep -q files-setup /etc/xdg/plasma-workspace/env/kantanos-files.sh"
+mkdir -p /tmp/fmtest/Documents
+check "sidebar setup writes the sidebar"   "HOME=/tmp/fmtest XDG_DATA_HOME=/tmp/fmtest/d /usr/libexec/kantanos/files-setup; grep -q applications:/ /tmp/fmtest/d/user-places.xbel && xmllint --noout /tmp/fmtest/d/user-places.xbel"
+check "file manager window rule present"   "grep -q wmclass=dolphin /etc/xdg/kwinrulesrc"
+check "file manager is named Files"        "grep -q ^Name=Files /usr/share/applications/org.kde.dolphin.desktop"
+check "daily update timer enabled"         "systemctl is-enabled uupd.timer"
 check "update recipes parse"                "just --justfile /usr/share/ublue-os/justfile --list | grep -q kantan-undo-update"
 . /usr/lib/os-release
 if [ -n "$KANTAN_IMAGE" ]; then

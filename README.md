@@ -72,13 +72,24 @@ Tested 2026-11-12: unsigned refused, signed 0.1.0 → 0.1.1 (385 MB download), u
 - Japanese input (fcitx5 + Mozc) and Japanese locale
 - Starter apps installed on first boot: Firefox, Gwenview, Okular, KCalc, VLC
 - KantanOS Welcome: one-click installs for office, creative, media and chat apps; HDR and 7.1 helpers
-- Explorer-style file manager defaults (details view, sidebar)
+- Explorer-style file manager ("Files", which is Dolphin configured, not a new program):
+  two-row toolbar (Back/Forward/Up/Refresh + address bar; New/Cut/Copy/Paste/Rename/Delete/
+  Sort/View), "Home > Documents" address bar, coloured folders in a details list, sidebar with
+  Home, Desktop, Downloads, Documents, Pictures, Music, Videos, Programs, Trash.
+  Sources: `tools/make-file-manager.py` (toolbar, from `tools/dolphin/dolphinui-upstream.rc`),
+  `system_files/etc/xdg/dolphinrc`, `kwinrulesrc` (opening size), `/etc/skel/.local/state/dolphinstaterc`
+  (sidebar width), `/usr/libexec/kantanos/files-setup` (sidebar, once per user).
+  Try changes live with `tools/vm/push-files.py`. Not done: a `C:\` view (planned to be the
+  Windows-apps drive once Wine is set up), the window title still says "Dolphin".
 - Full codecs from the base (H.264, HEVC, AV1, AC-3, E-AC-3, DTS, TrueHD) and mpv
 - `ujust kantan-hdr-on`, `ujust kantan-hdr-off`, `ujust kantan-audio-71`, `ujust kantan-version`
 
 ## Not done yet
 
-- Updates work in the test VM but nothing is published: `tools/registry.conf` is empty, the
-  project is not on GitHub, and the ISO in `output/iso` predates the update address (rebuild it).
-- Installer still shows Fedora artwork and has no language, keyboard or time zone pages.
+- Updates are live (first GitHub build 2026-11-12; a test VM updated itself from
+  `ghcr.io/karyuudosoftware/kantanos`). `tools/check-published.sh` re-checks access and signature;
+  `tools/ci-wait.sh` waits for the newest GitHub build. Old dated tags are never cleaned up yet.
+- Installer: KantanOS logo and colours, plus language, keyboard and time zone pages, come from
+  `tools/iso/make-iso-config.sh` (the artwork rides in the kickstart's `%pre`). Still stock:
+  the title says "KantanOS 45" (the Fedora release number), and the time zone page needs one visit.
 - Nothing has been tested on real hardware (NVIDIA, HDR, 7.1 audio).

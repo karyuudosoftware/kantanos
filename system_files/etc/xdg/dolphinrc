@@ -1,15 +1,29 @@
 [General]
 # File manager defaults that feel familiar coming from Windows Explorer.
 GlobalViewProps=true
-ShowFullPath=true
-ShowFullPathInTitlebar=true
+# Address bar shows "Home > Documents", not the raw /var/home/... path
+ShowFullPath=false
+ShowFullPathInTitlebar=false
 BrowseThroughArchives=true
 RememberOpenedTabs=false
 ShowStatusBar=FullWidth
+ShowZoomSlider=false
+ShowToolTips=true
+ConfirmClosingMultipleTabs=false
 
 [DetailsMode]
-PreviewSize=22
+# 32 px rows get full-colour folder and file icons
+IconSize=32
+PreviewSize=32
 ExpandableFolders=false
+HighlightEntireRow=true
+
+[IconsMode]
+IconSize=64
+PreviewSize=96
+
+[PlacesPanel]
+IconSize=22
 
 [PreviewSettings]
 Plugins=appimagethumbnail,audiothumbnail,comicbookthumbnail,djvuthumbnail,ebookthumbnail,exrthumbnail,imagethumbnail,jpegthumbnail,kraorathumbnail,opendocumentthumbnail,svgthumbnail,windowsexethumbnail,windowsimagethumbnail,ffmpegthumbs

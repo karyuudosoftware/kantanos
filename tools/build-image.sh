@@ -10,6 +10,7 @@ BUILD=${KANTAN_BUILD:-$(date -u +%Y%m%d)}
 bash tools/render-branding.sh >/dev/null
 python3 tools/make-plasma-theme.py >/dev/null
 python3 tools/make-welcome.py >/dev/null
+python3 tools/make-file-manager.py >/dev/null
 TAGS=(-t localhost/kantanos:latest -t "localhost/kantanos:$VERSION")
 [ -n "$KANTAN_IMAGE" ] && TAGS+=(-t "$KANTAN_IMAGE:latest")
 podman build \
