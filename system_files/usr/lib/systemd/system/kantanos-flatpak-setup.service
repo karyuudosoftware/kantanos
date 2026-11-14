@@ -6,9 +6,18 @@ ConditionPathExists=!/var/lib/kantanos/flatpaks-installed
 
 [Service]
 Type=simple
+# Wait until the login screen has had time to appear, then download in the background at
+# the lowest disk and CPU priority. On a slow disk (a USB stick) an eager download starved
+# the login screen until it gave up, leaving a black screen.
+ExecStartPre=/usr/bin/sleep 180
 ExecStart=/usr/libexec/kantanos/flatpak-setup
+Nice=19
+IOSchedulingClass=idle
+IOWeight=10
+CPUWeight=20
+TimeoutStartSec=infinity
 Restart=on-failure
-RestartSec=120
+RestartSec=300
 
 [Install]
 WantedBy=multi-user.target

@@ -1,3 +1,7 @@
 # Show the graphical boot splash instead of scrolling boot text,
 # also when a serial console is attached (as in the test VM).
-kargs = ["rhgb", "quiet", "plymouth.ignore-serial-consoles"]
+#
+# bluetooth.disable_ertm=1 is what the base's first-boot hardware setup adds on every PC
+# (for game controllers). Shipping it here means a typical desktop needs no change at first
+# boot, so it skips the slow "apply and restart" step entirely.
+kargs = ["rhgb", "quiet", "plymouth.ignore-serial-consoles", "bluetooth.disable_ertm=1"]
