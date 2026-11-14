@@ -2,10 +2,10 @@
 widgetStyle=Breeze
 
 [kdeglobals][General]
-ColorScheme=KantanGlass
+ColorScheme=KantanLight
 
 [kdeglobals][Icons]
-Theme=breeze-dark
+Theme=breeze
 
 [plasmarc][Theme]
 name=KantanGlass

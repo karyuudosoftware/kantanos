@@ -1,0 +1,11 @@
+# Watch TV is reserved for the KantanOS TV app (to be built; not Kodi).
+# The tile stays hidden until that app exists: set Exec to its command and remove Hidden.
+[Mode]
+Name=Watch TV
+Name[ja]=テレビを見る
+Comment=Live TV and video with the remote
+Comment[ja]=リモコンでライブテレビと動画
+Icon=tv
+Exec=
+Hidden=true
+Order=20

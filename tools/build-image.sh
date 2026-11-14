@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 . tools/image-ref.sh
 VERSION=${KANTAN_VERSION:-$(cat VERSION)}
 BUILD=${KANTAN_BUILD:-$(date -u +%Y%m%d)}
+python3 tools/looks.py >/dev/null            # looks first: the renderer uses what it writes
 bash tools/render-branding.sh >/dev/null
 python3 tools/make-plasma-theme.py >/dev/null
 python3 tools/make-welcome.py >/dev/null

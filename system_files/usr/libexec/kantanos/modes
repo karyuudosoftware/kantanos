@@ -1,0 +1,374 @@
+#!/usr/bin/python3
+"""KantanOS mode chooser: a full-screen "what would you like to do?" screen.
+
+Tiles come from *.mode files (INI, section [Mode]):
+  /usr/share/kantanos/modes/*.mode          shipped with KantanOS
+  ~/.config/kantanos/modes/*.mode           the user's own shortcuts (same file name = override)
+
+Keys: Name, Name[ja], Comment, Comment[ja], Icon (desktop, tv, game, retro, web; or a full
+path), Exec (shell command; empty = just go to the desktop), Flatpak (app that is installed
+on first use), Order (number), Hidden (true/false).
+
+  modes            show the chooser
+  modes --login    same, but stay quiet if the user turned "show at startup" off
+"""
+import configparser
+import locale
+import os
+import re
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+from PySide6.QtCore import Property, QObject, QProcess, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtQml import QQmlApplicationEngine
+
+SYS_DIR = Path(os.environ.get("KANTAN_MODES_DIR", "/usr/share/kantanos/modes"))
+USER_BASE = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "kantanos"
+USER_DIR = USER_BASE / "modes"
+PREFS = USER_BASE / "modes.conf"
+LOOKS_DIR = Path(os.environ.get("KANTAN_LOOKS_DIR", "/usr/share/kantanos/looks"))
+LOOK_STATE = USER_BASE / "look"
+ICON_NAMES = ("desktop", "tv", "game", "retro", "web", "add")
+
+
+def file_url(path):
+    return QUrl.fromLocalFile(str(path)).toString()
+
+
+def read_look(look_id):
+    """A look's settings (tools/looks.py writes them) plus the files that go with it."""
+    values = {}
+    try:
+        for line in (LOOKS_DIR / look_id / "look.conf").read_text(encoding="utf-8").splitlines():
+            key, sep, value = line.partition("=")
+            if sep:
+                values[key.strip()] = value.strip().strip('"')
+    except OSError:
+        return None
+    values["wallpaper"] = file_url(LOOKS_DIR / look_id / "wallpaper.png")
+    values["logo"] = file_url(LOOKS_DIR / look_id / "logo.png")
+    values["icons"] = file_url(LOOKS_DIR / look_id / "icons")
+    values["label"] = values.get("LABEL_JA" if LANG == "ja" else "LABEL", look_id)
+    return values
+
+
+def look_ids():
+    try:
+        return (LOOKS_DIR / "order").read_text(encoding="utf-8").split()
+    except OSError:
+        return []
+
+
+def current_look_id():
+    try:
+        look_id = LOOK_STATE.read_text(encoding="utf-8").split()[0]
+        if (LOOKS_DIR / look_id / "look.conf").exists():
+            return look_id
+    except (OSError, IndexError):
+        pass
+    try:
+        return (LOOKS_DIR / "default").read_text(encoding="utf-8").split()[0]
+    except (OSError, IndexError):
+        return "light"
+
+STRINGS = {
+    "en": {
+        "title": "What would you like to do?",
+        "add": "Add shortcut",
+        "addHint": "A website or live stream as its own tile",
+        "addTitle": "New shortcut",
+        "name": "Name",
+        "address": "Web address",
+        "save": "Add",
+        "cancel": "Cancel",
+        "remove": "Remove",
+        "install": "Not installed yet. Select to install.",
+        "installing": "Installing %1. This can take a few minutes.",
+        "failed": "%1 could not be installed. Check the internet connection and try again.",
+        "ok": "OK",
+        "atStartup": "Show this screen at startup",
+        "restart": "Restart",
+        "shutdown": "Shut down",
+        "hint": "Arrow keys or mouse to choose, Enter to open, Esc for the desktop",
+        "look": "Look",
+    },
+    "ja": {
+        "title": "何をしますか？",
+        "add": "ショートカットを追加",
+        "addHint": "ウェブサイトやライブ配信をタイルにします",
+        "addTitle": "新しいショートカット",
+        "name": "名前",
+        "address": "ウェブアドレス",
+        "save": "追加",
+        "cancel": "キャンセル",
+        "remove": "削除",
+        "install": "まだインストールされていません。選択するとインストールします。",
+        "installing": "%1 をインストールしています。数分かかることがあります。",
+        "failed": "%1 をインストールできませんでした。インターネット接続を確認して、もう一度お試しください。",
+        "ok": "OK",
+        "atStartup": "起動時にこの画面を表示する",
+        "restart": "再起動",
+        "shutdown": "シャットダウン",
+        "hint": "矢印キーまたはマウスで選択、Enter で開く、Esc でデスクトップへ",
+        "look": "テーマ",
+    },
+}
+
+
+def language():
+    for var in ("LC_ALL", "LC_MESSAGES", "LANG"):
+        value = os.environ.get(var, "")
+        if value:
+            return value.split("_")[0].split(".")[0].lower()
+    return (locale.getlocale()[0] or "en").split("_")[0].lower()
+
+
+LANG = language()
+
+
+def read_mode(path, custom):
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.optionxform = str
+    try:
+        parser.read(path, encoding="utf-8")
+        section = parser["Mode"]
+    except (configparser.Error, KeyError, OSError):
+        return None
+    if section.get("Hidden", "false").strip().lower() == "true":
+        return {"id": path.stem, "hidden": True}
+
+    def text(key):
+        return section.get(f"{key}[{LANG}]", section.get(key, "")).strip()
+
+    # Icon: one of the built-in names (drawn in the current look's colours) or a full path.
+    icon = section.get("Icon", "web").strip()
+    icon_file = file_url(icon) if icon.startswith("/") and os.path.exists(icon) else ""
+    if not icon_file and icon not in ICON_NAMES:
+        icon = "web"
+    try:
+        order = int(section.get("Order", "50"))
+    except ValueError:
+        order = 50
+    return {
+        "id": path.stem,
+        "hidden": False,
+        "name": text("Name") or path.stem,
+        "comment": text("Comment"),
+        "icon": icon,
+        "iconFile": icon_file,
+        "exec": section.get("Exec", "").strip(),
+        "flatpak": section.get("Flatpak", "").strip(),
+        "order": order,
+        "custom": custom,
+        "installed": True,
+    }
+
+
+def flatpak_installed(app_id):
+    try:
+        return subprocess.run(["flatpak", "info", app_id], capture_output=True, timeout=20).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def load_modes():
+    found = {}
+    for directory, custom in ((SYS_DIR, False), (USER_DIR, True)):
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.glob("*.mode")):
+            mode = read_mode(path, custom)
+            if mode:
+                found[mode["id"]] = mode
+    modes = [m for m in found.values() if not m["hidden"]]
+    for mode in modes:
+        if mode["flatpak"]:
+            mode["installed"] = flatpak_installed(mode["flatpak"])
+    return sorted(modes, key=lambda m: (m["order"], m["name"].lower()))
+
+
+def read_show_at_login():
+    parser = configparser.ConfigParser()
+    try:
+        parser.read(PREFS, encoding="utf-8")
+        return parser.getboolean("General", "ShowAtLogin", fallback=True)
+    except configparser.Error:
+        return True
+
+
+class Backend(QObject):
+    modesChanged = Signal()
+    busyChanged = Signal()
+    failed = Signal(str)
+    showAtLoginChanged = Signal()
+    lookChanged = Signal()
+
+    def __init__(self, app):
+        super().__init__()
+        self._app = app
+        self._modes = load_modes()
+        self._busy = ""
+        self._show = read_show_at_login()
+        self._process = None
+        self._look = read_look(current_look_id()) or {}
+        self._looks = [look for look in (read_look(i) for i in look_ids()) if look]
+
+    @Property("QVariantList", notify=modesChanged)
+    def modes(self):
+        return self._modes
+
+    @Property(str, notify=busyChanged)
+    def busy(self):
+        return self._busy
+
+    @Property("QVariantMap", constant=True)
+    def text(self):
+        return STRINGS.get(LANG, STRINGS["en"])
+
+    @Property("QVariantMap", notify=lookChanged)
+    def look(self):
+        return self._look
+
+    @Property("QVariantList", constant=True)
+    def looks(self):
+        return self._looks
+
+    @Slot(str)
+    def setLook(self, look_id):
+        look = read_look(look_id)
+        if not look or look_id == self._look.get("ID"):
+            return
+        self._look = look
+        self.lookChanged.emit()
+        # Recolours the desktop behind the chooser too (wallpaper, colours, icons).
+        QProcess.startDetached("kantan-look", ["set", look_id])
+
+    @Property(bool, notify=showAtLoginChanged)
+    def showAtLogin(self):
+        return self._show
+
+    def _set_busy(self, value):
+        self._busy = value
+        self.busyChanged.emit()
+
+    def _launch(self, mode):
+        if mode["exec"]:
+            # Start the app in its own systemd scope so it keeps running after the chooser closes.
+            QProcess.startDetached(
+                "systemd-run", ["--user", "--scope", "--collect", "--quiet", "/bin/sh", "-c", mode["exec"]]
+            )
+            # Leave the chooser up briefly so the app's window appears over it, not over a bare desktop.
+            QTimer.singleShot(2500, self._app.quit)
+        else:
+            self._app.quit()
+
+    @Slot(int)
+    def activate(self, index):
+        if self._busy or not 0 <= index < len(self._modes):
+            return
+        mode = self._modes[index]
+        if mode["flatpak"] and not mode["installed"]:
+            self._set_busy(self.text["installing"].replace("%1", mode["name"]))
+            self._process = QProcess(self)
+            self._process.finished.connect(lambda code, _status, m=mode: self._installed(m, code))
+            self._process.errorOccurred.connect(lambda _error, m=mode: self._installed(m, 1))
+            self._process.start("kantan-app", ["install", mode["flatpak"]])
+            self._process.closeWriteChannel()   # nothing will ever be typed into it
+            return
+        self._launch(mode)
+
+    def _installed(self, mode, code):
+        if not self._busy:
+            return
+        self._set_busy("")
+        if code == 0 and flatpak_installed(mode["flatpak"]):
+            mode["installed"] = True
+            self.modesChanged.emit()
+            self._launch(mode)
+        else:
+            self.failed.emit(self.text["failed"].replace("%1", mode["name"]))
+
+    @Slot(str, str, result=bool)
+    def addShortcut(self, name, address):
+        name, address = name.strip(), address.strip()
+        if not name or not address or any(c in address for c in " \t\n'\"\\`$"):
+            return False
+        if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", address):
+            address = "https://" + address
+        if not address.lower().startswith(("http://", "https://")):
+            return False
+        slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "shortcut"
+        USER_DIR.mkdir(parents=True, exist_ok=True)
+        path = USER_DIR / f"80-{slug}.mode"
+        number = 2
+        while path.exists():
+            path = USER_DIR / f"80-{slug}-{number}.mode"
+            number += 1
+        path.write_text(
+            "[Mode]\n"
+            f"Name={name.replace(chr(10), ' ')}\n"
+            f"Comment={address}\n"
+            "Icon=web\n"
+            f"Exec=flatpak run org.mozilla.firefox --kiosk {shlex.quote(address)}\n"
+            "Flatpak=org.mozilla.firefox\n"
+            "Order=80\n",
+            encoding="utf-8",
+        )
+        self._modes = load_modes()
+        self.modesChanged.emit()
+        return True
+
+    @Slot(int)
+    def removeShortcut(self, index):
+        if not 0 <= index < len(self._modes) or not self._modes[index]["custom"]:
+            return
+        path = USER_DIR / f"{self._modes[index]['id']}.mode"
+        try:
+            path.unlink()
+        except OSError:
+            return
+        self._modes = load_modes()
+        self.modesChanged.emit()
+
+    @Slot(bool)
+    def setShowAtLogin(self, value):
+        self._show = bool(value)
+        USER_BASE.mkdir(parents=True, exist_ok=True)
+        PREFS.write_text(f"[General]\nShowAtLogin={'true' if self._show else 'false'}\n", encoding="utf-8")
+        self.showAtLoginChanged.emit()
+
+    @Slot(str)
+    def power(self, action):
+        # Plasma's own confirmation screen does the asking.
+        method = {"restart": "promptReboot", "shutdown": "promptShutDown"}.get(action)
+        if method:
+            QProcess.startDetached(
+                "busctl", ["--user", "call", "org.kde.LogoutPrompt", "/LogoutPrompt", "org.kde.LogoutPrompt", method]
+            )
+
+    @Slot()
+    def desktop(self):
+        self._app.quit()
+
+
+def main():
+    if "--login" in sys.argv and not read_show_at_login():
+        return 0
+    app = QGuiApplication(sys.argv)
+    app.setApplicationName("kantanos-modes")
+    app.setApplicationDisplayName("KantanOS")
+    app.setDesktopFileName("kantanos-modes")
+    backend = Backend(app)
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("backend", backend)
+    engine.load(QUrl.fromLocalFile(str(SYS_DIR / "ui" / "Main.qml")))
+    if not engine.rootObjects():
+        return 1
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

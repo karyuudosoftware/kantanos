@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Modes
+Name[ja]=モード
+GenericName=Desktop, TV, games
+Comment=Choose what to do: Desktop, Watch TV, Game Mode, Retro Games or your own shortcuts
+Exec=/usr/libexec/kantanos/modes
+Icon=kantanos-modes
+Categories=System;
+Keywords=mode;tv;game;retro;steam;start;home;
+StartupNotify=false

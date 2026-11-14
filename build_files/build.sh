@@ -10,7 +10,7 @@ KANTAN_IMAGE="${KANTAN_IMAGE:-}"
 ### 1. System files -----------------------------------------------------------
 # The sources live on a Windows drive, so do not trust their permissions.
 cp -rT --no-preserve=mode,ownership /ctx/system /
-chmod 0755 /usr/libexec/kantanos/* /usr/bin/kantan-app
+chmod 0755 /usr/libexec/kantanos/* /usr/bin/kantan-app /usr/bin/kantan-look
 
 ### 2. Packages ---------------------------------------------------------------
 # Japanese input (fcitx5 + Mozc), Japanese locale, the Inter UI font, a media player.
@@ -61,12 +61,19 @@ fi
 systemctl enable uupd.timer
 
 ### 4. Desktop defaults -------------------------------------------------------
-# Colour scheme: Breeze Dark with the KantanOS indigo accent.
-sed -e 's/^Name=.*/Name=Kantan Glass/' \
-    -e '/^Name\[/d' \
-    -e 's/61,174,233/108,123,255/g' \
-    -e 's/29,153,243/122,162,255/g' \
-    /usr/share/color-schemes/BreezeDark.colors > /usr/share/color-schemes/KantanGlass.colors
+# One colour scheme per look (tools/looks.py): Breeze Light or Dark with the look's accent.
+for conf in /usr/share/kantanos/looks/*/look.conf; do
+    ( . "$conf"
+      sed -e "s/^Name=.*/Name=Kantan ${LABEL}/" \
+          -e '/^Name\[/d' \
+          -e "s/61,174,233/${ACCENT}/g" \
+          -e "s/29,153,243/${ACCENT_HOVER}/g" \
+          "/usr/share/color-schemes/${BASE_SCHEME}.colors" > "/usr/share/color-schemes/${SCHEME}.colors" )
+done
+# New users start with the default look.
+( . "/usr/share/kantanos/looks/$(cat /usr/share/kantanos/looks/default)/look.conf"
+  sed -i -e "s|^ColorScheme=.*|ColorScheme=${SCHEME}|" -e "s|^Theme=breeze.*|Theme=${ICON_THEME}|" \
+      /usr/share/plasma/look-and-feel/org.kantanos.desktop/contents/defaults )
 
 # Make the KantanOS look the default for new users.
 sed -i 's|^LookAndFeelPackage=.*|LookAndFeelPackage=org.kantanos.desktop|' /etc/xdg/kdeglobals

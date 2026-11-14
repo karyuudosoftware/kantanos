@@ -9,7 +9,8 @@ set -euo pipefail
 OUT=${1:?usage: make-iso-config.sh <output.toml>}
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LOGO=$(mktemp --suffix=.png)
-rsvg-convert -w 220 "$ROOT/branding/kantanos-logo-stacked-on-dark.svg" -o "$LOGO"
+# Logo in the default look's colours (tools/looks.py writes branding/default/).
+rsvg-convert -w 220 "$ROOT/branding/default/kantanos-logo-stacked-on-dark.svg" -o "$LOGO"
 
 {
 cat <<'TOML'

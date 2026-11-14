@@ -24,6 +24,44 @@ screens:
         description: "Show the KantanOS version and system details."
         default: false
         script: "nohup setsid kinfocenter >&/dev/null"
+  - title: "Look"
+    description: "Pick a colour style. It changes the wallpaper, colours and icons straight away."
+    actions:
+      - id: "look-light"
+        title: "Light"
+        description: "Light style. This is the one KantanOS starts with."
+        default: false
+        script: "kantan-look set light"
+      - id: "look-sakura"
+        title: "Sakura"
+        description: "Light style."
+        default: false
+        script: "kantan-look set sakura"
+      - id: "look-graphite"
+        title: "Graphite"
+        description: "Dark style."
+        default: false
+        script: "kantan-look set graphite"
+      - id: "look-ocean"
+        title: "Ocean"
+        description: "Dark style."
+        default: false
+        script: "kantan-look set ocean"
+      - id: "look-forest"
+        title: "Forest"
+        description: "Dark style."
+        default: false
+        script: "kantan-look set forest"
+      - id: "look-ember"
+        title: "Ember"
+        description: "Dark style."
+        default: false
+        script: "kantan-look set ember"
+      - id: "look-aurora"
+        title: "Aurora"
+        description: "Dark style."
+        default: false
+        script: "kantan-look set aurora"
   - title: "Office"
     description: "Documents, notes and email"
     actions:

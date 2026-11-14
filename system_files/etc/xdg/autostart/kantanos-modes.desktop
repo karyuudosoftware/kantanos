@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=KantanOS mode chooser
+Comment=Shows the "What would you like to do?" screen after login
+Exec=/usr/libexec/kantanos/modes --login
+Icon=kantanos-modes
+X-KDE-autostart-phase=2
+NoDisplay=true

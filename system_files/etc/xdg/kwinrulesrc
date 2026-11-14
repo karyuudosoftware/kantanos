@@ -1,6 +1,6 @@
 [General]
-count=1
-rules=kantanos-files
+count=2
+rules=kantanos-files,kantanos-modes
 
 [kantanos-files]
 Description=File manager opens at a comfortable size
@@ -11,3 +11,17 @@ size=1280,820
 sizerule=3
 placement=5
 placementrule=2
+
+[kantanos-modes]
+Description=Mode chooser covers the whole screen, above other windows
+wmclass=kantanos-modes
+wmclassmatch=2
+types=1
+fullscreen=true
+fullscreenrule=2
+above=true
+aboverule=2
+noborder=true
+noborderrule=2
+skiptaskbar=true
+skiptaskbarrule=2

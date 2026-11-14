@@ -1,0 +1,46 @@
+#!/usr/bin/bash
+# kantan-look: switch the KantanOS look (wallpaper, colours, icons) for the current user.
+#   kantan-look list           ids of the available looks
+#   kantan-look current        id of the look in use
+#   kantan-look set <id>       apply a look now
+LOOKS=/usr/share/kantanos/looks
+STATE="${XDG_CONFIG_HOME:-$HOME/.config}/kantanos/look"
+
+current() {
+    local id=""
+    [ -r "$STATE" ] && id="$(head -n1 "$STATE")"
+    [ -n "$id" ] && [ -r "$LOOKS/$id/look.conf" ] || id="$(cat "$LOOKS/default")"
+    echo "$id"
+}
+
+case "${1:-}" in
+    list)
+        for id in $(cat "$LOOKS/order"); do echo "$id"; done
+        ;;
+    current)
+        current
+        ;;
+    set)
+        id="${2:-}"
+        if [ -z "$id" ] || [ ! -r "$LOOKS/$id/look.conf" ]; then
+            echo "Unknown look. Choose one of: $(tr '\n' ' ' < "$LOOKS/order")"; exit 2
+        fi
+        . "$LOOKS/$id/look.conf"
+        mkdir -p "$(dirname "$STATE")"
+        echo "$id" > "$STATE"
+        wallpaper="$LOOKS/$id/wallpaper.png"
+        # Outside a graphical session (a text console, a script) the Plasma tools still work
+        # through the session bus, but must not try to open a window.
+        [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] || export QT_QPA_PLATFORM=offscreen
+        plasma-apply-colorscheme "$SCHEME" >/dev/null 2>&1 || echo "could not apply colours"
+        plasma-apply-wallpaperimage "$wallpaper" >/dev/null 2>&1 || echo "could not apply wallpaper"
+        /usr/libexec/plasma-changeicons "$ICON_THEME" >/dev/null 2>&1 || true
+        # Lock screen for this user
+        kwriteconfig6 --file kscreenlockerrc --group Greeter --group Wallpaper --group org.kde.image --group General --key Image "$wallpaper"
+        kwriteconfig6 --file kscreenlockerrc --group Greeter --group Wallpaper --group org.kde.image --group General --key PreviewImage "$wallpaper"
+        echo "Look set to $LABEL."
+        ;;
+    *)
+        echo "usage: kantan-look list | current | set <id>"; exit 2
+        ;;
+esac

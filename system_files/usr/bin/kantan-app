@@ -6,7 +6,9 @@ if [ -z "$action" ] || [ -z "$app" ]; then
     echo "usage: kantan-app status|install|uninstall <flatpak-id>"; exit 2
 fi
 
-pause() { echo; echo "Press Enter to close..."; read -r _; }
+# Only wait for Enter when a person is watching in a terminal (the Welcome app);
+# the mode chooser runs this in the background and must not be kept waiting.
+pause() { if [ -t 0 ]; then echo; echo "Press Enter to close..."; read -r _; fi; }
 
 case "$action" in
     status)

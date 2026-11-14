@@ -85,6 +85,13 @@ doc += screen("Welcome!", "Get started with KantanOS", "".join([
     action("about", "About this PC", "Show the KantanOS version and system details.",
            "nohup setsid kinfocenter >&/dev/null"),
 ]), hidden=True)
+import looks as _looks  # tools/looks.py: the table of colour styles
+
+doc += screen("Look", "Pick a colour style. It changes the wallpaper, colours and icons straight away.", "".join(
+    action(f"look-{look_id}", label,
+           ("Dark" if dark else "Light") + " style." + (" This is the one KantanOS starts with." if look_id == _looks.DEFAULT else ""),
+           f"kantan-look set {look_id}")
+    for look_id, (label, _ja, dark, *_rest) in _looks.LOOKS.items()))
 doc += screen("Office", "Documents, notes and email", "".join(app(*a) for a in OFFICE))
 doc += screen("Creative", "Photos, drawing, video and audio", "".join(app(*a) for a in CREATIVE) + action(
     "artcraft", "ArtCraft", "Free creative and office apps (still in development). Opens the ArtCraft website, where you can get its launcher.",

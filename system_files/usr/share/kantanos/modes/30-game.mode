@@ -1,0 +1,8 @@
+[Mode]
+Name=Game Mode
+Name[ja]=ゲームモード
+Comment=Your game library, full screen, for a controller
+Comment[ja]=コントローラーで遊べる全画面のゲームライブラリ
+Icon=game
+Exec=bazzite-steam -gamepadui
+Order=30

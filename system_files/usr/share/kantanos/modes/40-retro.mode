@@ -1,0 +1,9 @@
+[Mode]
+Name=Retro Games
+Name[ja]=レトロゲーム
+Comment=Classic consoles with your own game files (RetroDECK)
+Comment[ja]=自分のゲームファイルで遊ぶクラシックゲーム機 (RetroDECK)
+Icon=retro
+Exec=flatpak run net.retrodeck.retrodeck
+Flatpak=net.retrodeck.retrodeck
+Order=40

@@ -81,6 +81,16 @@ Tested 2026-11-12: unsigned refused, signed 0.1.0 → 0.1.1 (385 MB download), u
   (sidebar width), `/usr/libexec/kantanos/files-setup` (sidebar, once per user).
   Try changes live with `tools/vm/push-files.py`. Not done: a `C:\` view (planned to be the
   Windows-apps drive once Wine is set up), the window title still says "Dolphin".
+- Mode chooser (`/usr/libexec/kantanos/modes`, Python + QML): a full-screen "What would you
+  like to do?" overlay after login and from the Modes dock icon. Tiles are `*.mode` files in
+  `/usr/share/kantanos/modes` (Desktop, Game Mode = Steam Big Picture, Retro Games = RetroDECK
+  installed on first use; Watch TV is hidden until the custom TV app exists; no Kodi) plus the
+  user's own web shortcuts in `~/.config/kantanos/modes`. Arrow keys, Enter, Esc, or mouse.
+- Looks: seven colour styles from one table in `tools/looks.py` (Light is the default; Sakura,
+  Graphite, Ocean, Forest, Ember, Aurora). Each has a wallpaper, colour scheme, logo tint and
+  tile icons under `/usr/share/kantanos/looks/<id>`. Switch from the swatches in the mode
+  chooser, the Look tab in Welcome, or `kantan-look set <id>`. Boot splash, installer and
+  login screen always use the default look's colours.
 - Full codecs from the base (H.264, HEVC, AV1, AC-3, E-AC-3, DTS, TrueHD) and mpv
 - `ujust kantan-hdr-on`, `ujust kantan-hdr-off`, `ujust kantan-audio-71`, `ujust kantan-version`
 

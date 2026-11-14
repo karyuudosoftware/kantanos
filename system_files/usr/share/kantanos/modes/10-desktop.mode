@@ -1,0 +1,8 @@
+[Mode]
+Name=Desktop
+Name[ja]=デスクトップ
+Comment=Files, web, email and all your apps
+Comment[ja]=ファイル、ウェブ、メール、すべてのアプリ
+Icon=desktop
+Exec=
+Order=10
