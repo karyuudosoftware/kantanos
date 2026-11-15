@@ -75,6 +75,45 @@ Window {
         }
     }
 
+    // Warning when signed in as root (no normal account was made in the installer)
+    Rectangle {
+        id: rootBanner
+        visible: backend.isRoot
+        z: 5
+        anchors { top: parent.top; horizontalCenter: parent.horizontalCenter; topMargin: 28 * root.u }
+        width: Math.min(parent.width - 80 * root.u, 1100 * root.u)
+        height: bannerRow.implicitHeight + 32 * root.u
+        radius: 18 * root.u
+        color: "#f2b3261e"
+        border.color: "#ffffffff"; border.width: 1
+        RowLayoutLike {
+            id: bannerRow
+            anchors.fill: parent
+            anchors.margins: 16 * root.u
+        }
+    }
+    component RowLayoutLike: Item {
+        implicitHeight: Math.max(warnText.implicitHeight, warnButton.height)
+        Text {
+            id: warnText
+            anchors { left: parent.left; right: warnButton.left; rightMargin: 20 * root.u; verticalCenter: parent.verticalCenter }
+            text: backend.text.rootWarning
+            color: "white"
+            wrapMode: Text.WordWrap
+            font.pixelSize: 19 * root.u
+        }
+        Rectangle {
+            id: warnButton
+            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+            width: warnLabel.implicitWidth + 40 * root.u
+            height: 50 * root.u
+            radius: height / 2
+            color: warnArea.containsMouse ? "#ffffff" : "#e6ffffff"
+            Text { id: warnLabel; anchors.centerIn: parent; text: backend.text.createAccount; color: "#b3261e"; font.pixelSize: 19 * root.u; font.weight: Font.DemiBold }
+            MouseArea { id: warnArea; anchors.fill: parent; hoverEnabled: true; onClicked: backend.createAccount() }
+        }
+    }
+
     // Clock
     Text {
         id: clock

@@ -29,6 +29,7 @@ case "${1:-}" in
         mkdir -p "$(dirname "$STATE")"
         echo "$id" > "$STATE"
         wallpaper="$LOOKS/$id/wallpaper.png"
+        lockimage="$LOOKS/$id/lock.png"; [ -f "$lockimage" ] || lockimage="$wallpaper"
         # Outside a graphical session (a text console, a script) the Plasma tools still work
         # through the session bus, but must not try to open a window.
         [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] || export QT_QPA_PLATFORM=offscreen
@@ -36,8 +37,8 @@ case "${1:-}" in
         plasma-apply-wallpaperimage "$wallpaper" >/dev/null 2>&1 || echo "could not apply wallpaper"
         /usr/libexec/plasma-changeicons "$ICON_THEME" >/dev/null 2>&1 || true
         # Lock screen for this user
-        kwriteconfig6 --file kscreenlockerrc --group Greeter --group Wallpaper --group org.kde.image --group General --key Image "$wallpaper"
-        kwriteconfig6 --file kscreenlockerrc --group Greeter --group Wallpaper --group org.kde.image --group General --key PreviewImage "$wallpaper"
+        kwriteconfig6 --file kscreenlockerrc --group Greeter --group Wallpaper --group org.kde.image --group General --key Image "$lockimage"
+        kwriteconfig6 --file kscreenlockerrc --group Greeter --group Wallpaper --group org.kde.image --group General --key PreviewImage "$lockimage"
         echo "Look set to $LABEL."
         ;;
     *)

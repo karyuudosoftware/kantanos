@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Service
+MimeType=inode/directory;
+X-KDE-Priority=TopLevel
+Actions=folderSizes
+Icon=filelight
+
+[Desktop Action folderSizes]
+Name=Show Folder Sizes
+Name[ja]=フォルダーのサイズを表示
+Icon=filelight
+Exec=filelight %u

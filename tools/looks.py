@@ -81,6 +81,16 @@ def wallpaper_svg(look_id):
 '''
 
 
+def lock_svg(look_id):
+    """Lock and login screen background. Their clock and text are white, so light looks get a
+    dark veil over the wallpaper (like a phone's lock screen) to keep them readable."""
+    wp = wallpaper_svg(look_id)
+    if LOOKS[look_id][2]:          # dark look: the wallpaper as it is
+        return wp
+    veil = '  <rect width="3840" height="2160" fill="#0e1626" opacity="0.42"/>\n</svg>\n'
+    return wp.replace("</svg>\n", veil)
+
+
 def recolour(svg_text, look_id):
     """Swap the original artwork's cyan-indigo-purple for a look's gradient."""
     grad = LOOKS[look_id][3]
@@ -150,6 +160,7 @@ def main():
     share = ROOT / "system_files/usr/share/kantanos/looks"
     for look_id, (_label, _ja, dark, *_rest) in LOOKS.items():
         write(branding / "looks" / look_id / "wallpaper.svg", wallpaper_svg(look_id))
+        write(branding / "looks" / look_id / "lock.svg", lock_svg(look_id))
         logo = (branding / f"kantanos-logo-stacked-on-{'dark' if dark else 'light'}.svg").read_text(encoding="utf-8")
         write(branding / "looks" / look_id / "logo.svg", recolour(logo, look_id))
         write(share / look_id / "look.conf", look_conf(look_id))

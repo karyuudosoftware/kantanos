@@ -1,0 +1,167 @@
+#!/usr/bin/bash
+# KantanOS: connect network shares from a NAS (SMB), so they work like normal folders in
+# every app (games, emulators and players included), not just in Files.
+#
+#   nas-connect            ask for the NAS, sign in, pick shares, connect them
+#   nas-connect list       show connected shares
+#   nas-connect remove     disconnect all shares set up by this tool
+#
+# Runs as root (sudo). The NAS password is stored in /etc/kantanos/nas/<server>.cred,
+# readable by root only; shares appear under /var/mnt/nas/<share> and connect on first use.
+set -u
+CRED_DIR=/etc/kantanos/nas
+MNT_ROOT=/var/mnt/nas
+UNIT_DIR=/etc/systemd/system
+TAG="# made by kantanos nas-connect"
+USER_NAME="${SUDO_USER:-}"
+
+[ "$(id -u)" = 0 ] || exec sudo "$0" "$@"
+
+unit_name() { systemd-escape --path --suffix="$2" "$1"; }
+
+list_units() { grep -l -x "$TAG" "$UNIT_DIR"/*.mount 2>/dev/null; }
+
+case "${1:-}" in
+    list)
+        found=0
+        for u in $(list_units); do
+            found=1
+            what=$(sed -n 's/^What=//p' "$u"); where=$(sed -n 's/^Where=//p' "$u")
+            state=$(systemctl is-active "$(basename "$u")")
+            echo "$what  ->  $where  ($state)"
+        done
+        [ "$found" = 1 ] || echo "No NAS shares are connected yet. Run: ujust kantan-nas-connect"
+        exit 0 ;;
+    remove)
+        for u in $(list_units); do
+            b=$(basename "$u" .mount)
+            systemctl disable --now "$b.automount" "$b.mount" 2>/dev/null
+            rm -f "$UNIT_DIR/$b.mount" "$UNIT_DIR/$b.automount"
+        done
+        rm -f "$CRED_DIR"/*.cred
+        systemctl daemon-reload
+        # and take them out of the Files sidebar
+        if [ -n "$USER_NAME" ]; then
+            sudo -u "$USER_NAME" python3 - "$MNT_ROOT" <<'PY'
+import os, re, sys
+path = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "user-places.xbel")
+try:
+    text = open(path, encoding="utf-8").read()
+except OSError:
+    sys.exit(0)
+new = re.sub(r' <bookmark href="file://' + re.escape(sys.argv[1]) + r'/[^"]*">.*?</bookmark>\n', "", text, flags=re.S)
+if new != text:
+    open(path, "w", encoding="utf-8").write(new)
+PY
+        fi
+        echo "All NAS shares set up by KantanOS are disconnected."
+        exit 0 ;;
+esac
+
+echo "Connect your NAS"
+echo "================"
+read -r -p "NAS name or address [truenas.local]: " server
+server="${server:-truenas.local}"
+server="${server#smb://}"; server="${server%%/*}"
+case "$server" in *[!A-Za-z0-9._-]*|"") echo "That does not look like a network name or address."; exit 1 ;; esac
+if ! getent hosts "$server" >/dev/null; then
+    echo "Cannot find \"$server\" on the network. Check that the NAS is on, or type its IP address."
+    exit 1
+fi
+
+read -r -p "NAS user name: " nasuser
+[ -n "$nasuser" ] || { echo "A user name is needed."; exit 1; }
+read -r -s -p "NAS password (not shown): " naspass; echo
+
+mkdir -p "$CRED_DIR"; chmod 0700 "$CRED_DIR"
+cred="$CRED_DIR/$server.cred"
+umask 077
+printf 'username=%s\npassword=%s\n' "$nasuser" "$naspass" > "$cred.new"
+unset naspass
+
+# Which shares are there?
+mapfile -t shares < <(smbclient -L "//$server" -A "$cred.new" -g 2>/dev/null | awk -F'|' '$1=="Disk" && $2 !~ /\$$/ {print $2}')
+if [ "${#shares[@]}" = 0 ]; then
+    rm -f "$cred.new"
+    echo "Could not list the shares. The user name or password may be wrong, or this user has no shares."
+    exit 1
+fi
+mv -f "$cred.new" "$cred"
+
+echo
+echo "Shares on $server:"
+for i in "${!shares[@]}"; do echo "  $((i + 1)). ${shares[$i]}"; done
+read -r -p "Which to connect? Numbers separated by spaces, or Enter for all: " pick
+if [ -z "$pick" ]; then pick=$(seq 1 "${#shares[@]}"); fi
+
+uid=$(id -u "$USER_NAME" 2>/dev/null || echo 1000)
+gid=$(id -g "$USER_NAME" 2>/dev/null || echo 1000)
+connected=()
+for n in $pick; do
+    [[ "$n" =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] && [ "$n" -le "${#shares[@]}" ] || continue
+    share="${shares[$((n - 1))]}"
+    where="$MNT_ROOT/$share"
+    base=$(unit_name "$where" mount); base="${base%.mount}"
+    mkdir -p "$where"
+    cat > "$UNIT_DIR/$base.mount" <<EOF
+$TAG
+[Unit]
+Description=NAS share $share on $server
+Wants=network-online.target
+After=network-online.target
+
+[Mount]
+What=//$server/$share
+Where=$where
+Type=cifs
+Options=credentials=$cred,uid=$uid,gid=$gid,file_mode=0664,dir_mode=0775,iocharset=utf8,_netdev,nofail,soft
+TimeoutSec=30
+EOF
+    cat > "$UNIT_DIR/$base.automount" <<EOF
+[Unit]
+Description=Connect NAS share $share when it is first used
+
+[Automount]
+Where=$where
+TimeoutIdleSec=0
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    connected+=("$share")
+done
+systemctl daemon-reload
+for share in "${connected[@]}"; do
+    base=$(unit_name "$MNT_ROOT/$share" automount)
+    systemctl enable --now "$base" >/dev/null 2>&1
+done
+
+# Show them in the Files sidebar of the person who ran this
+if [ -n "$USER_NAME" ] && [ "${#connected[@]}" -gt 0 ]; then
+    sudo -u "$USER_NAME" python3 - "$MNT_ROOT" "${connected[@]}" <<'PY'
+import os, sys, time, urllib.parse
+root, shares = sys.argv[1], sys.argv[2:]
+path = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "user-places.xbel")
+try:
+    text = open(path, encoding="utf-8").read()
+except OSError:
+    sys.exit(0)
+stamp = int(time.time())
+added = ""
+for i, share in enumerate(shares):
+    href = "file://" + urllib.parse.quote(os.path.join(root, share))
+    if href in text:
+        continue
+    title = share.replace("&", "&amp;").replace("<", "&lt;")
+    added += (f' <bookmark href="{href}">\n  <title>{title}</title>\n  <info>\n'
+              f'   <metadata owner="http://freedesktop.org">\n    <bookmark:icon name="folder-network"/>\n   </metadata>\n'
+              f'   <metadata owner="http://www.kde.org">\n    <ID>{stamp}/nas{i}</ID>\n   </metadata>\n  </info>\n </bookmark>\n')
+if added:
+    open(path, "w", encoding="utf-8").write(text.replace("</xbel>", added + "</xbel>"))
+PY
+fi
+
+echo
+echo "Connected: ${connected[*]:-nothing}"
+echo "They are in Files (sidebar) and at $MNT_ROOT. They connect automatically when first opened."
+echo "To see them: ujust kantan-nas-list    To disconnect all: ujust kantan-nas-remove"

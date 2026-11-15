@@ -32,6 +32,7 @@ for dir in branding/looks/*/; do
   mkdir -p "$out"
   rsvg-convert -w 2560 -h 1440 "$dir/wallpaper.svg" -o "$out/wallpaper.png"
   rsvg-convert -w 720 "$dir/logo.svg" -o "$out/logo.png"
+  rsvg-convert -w 2560 -h 1440 "$dir/lock.svg" -o "$out/lock.png"
 done
 
 # The default look's wallpaper is also the system wallpaper (new users, login and lock screen)

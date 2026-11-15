@@ -95,6 +95,8 @@ STRINGS = {
         "shutdown": "Shut down",
         "hint": "Arrow keys or mouse to choose, Enter to open, Esc for the desktop",
         "look": "Look",
+        "rootWarning": "You are signed in as the system administrator (root). Some apps, like Steam, refuse to run like this, and a mistake here can damage the system. Create your own account and sign in with it instead.",
+        "createAccount": "Create your account",
     },
     "ja": {
         "title": "何をしますか？",
@@ -116,6 +118,8 @@ STRINGS = {
         "shutdown": "シャットダウン",
         "hint": "矢印キーまたはマウスで選択、Enter で開く、Esc でデスクトップへ",
         "look": "テーマ",
+        "rootWarning": "システム管理者（root）としてサインインしています。Steam など一部のアプリはこの状態では動作せず、操作を誤るとシステムを壊すおそれがあります。自分のアカウントを作成し、そのアカウントでサインインしてください。",
+        "createAccount": "アカウントを作成",
     },
 }
 
@@ -257,6 +261,16 @@ class Backend(QObject):
         # Recolours the desktop behind the chooser too (wallpaper, colours, icons).
         QProcess.startDetached("kantan-look", ["set", look_id])
 
+    @Property(bool, constant=True)
+    def isRoot(self):
+        return os.geteuid() == 0 or os.environ.get("KANTAN_TEST_ROOT") == "1"   # test switch
+
+    @Slot()
+    def createAccount(self):
+        # In its own scope, so it keeps running after the chooser closes.
+        QProcess.startDetached("systemd-run", ["--user", "--scope", "--collect", "--quiet", "systemsettings", "kcm_users"])
+        QTimer.singleShot(1500, self._app.quit)
+
     @Property(bool, notify=showAtLoginChanged)
     def showAtLogin(self):
         return self._show
@@ -367,7 +381,8 @@ class Backend(QObject):
 
 
 def main():
-    if "--login" in sys.argv and not read_show_at_login():
+    # Always shown to root, so the warning about the root login is never missed.
+    if "--login" in sys.argv and not read_show_at_login() and os.geteuid() != 0:
         return 0
     app = QGuiApplication(sys.argv)
     app.setApplicationName("kantanos-modes")

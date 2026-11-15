@@ -33,6 +33,9 @@ CHAT = [
     ("org.signal.Signal", "Signal", "Private messaging."),
     ("org.telegram.desktop", "Telegram", "Messaging."),
 ]
+TOOLS = [
+    ("com.github.shundhammer.qdirstat", "QDirStat", "See which folders use the most space, as a sorted list (like TreeSize on Windows)."),
+]
 
 PAUSE = 'echo; echo "Press Enter to close..."; read -r _'
 
@@ -84,6 +87,12 @@ doc += screen("Welcome!", "Get started with KantanOS", "".join([
            "nohup setsid gtk4-launch io.github.kolunmi.Bazaar >&/dev/null"),
     action("japanese", "Type in Japanese", "Japanese input is already installed. Press Ctrl+Space in any text box to switch between English and Japanese.",
            "nohup setsid fcitx5-configtool >&/dev/null"),
+    action("phone", "Connect your Android phone", "See phone notifications on the PC, share files and the clipboard, use the phone as a remote. Install KDE Connect on the phone from the Play Store, then pair it here.",
+           "nohup setsid kdeconnect-app >&/dev/null"),
+    action("nas", "Connect your NAS", "Make the shared folders on your NAS (for example a TrueNAS box) work like normal folders in every app. Asks for the NAS user name and password once.",
+           f"ujust kantan-nas-connect; {PAUSE}"),
+    action("wake", "Wake this PC from another device", "Shows the details a wake-up app needs to switch this PC on over the network (Wake-on-LAN).",
+           f"ujust kantan-wake-info; {PAUSE}"),
     action("update", "Check for updates", "Update KantanOS and your apps. A restart applies system updates; the previous version stays available as a fallback.",
            f"ujust update; {PAUSE}"),
     action("about", "About this PC", "Show the KantanOS version and system details.",
@@ -101,6 +110,12 @@ doc += screen("Creative", "Photos, drawing, video and audio", "".join(app(*a) fo
     "artcraft", "ArtCraft", "Free creative and office apps (still in development). Opens the ArtCraft website, where you can get its launcher.",
     "xdg-open https://getartcraft.com/"))
 doc += screen("Media & Chat", "Players and messaging", "".join(app(*a) for a in MEDIA + CHAT))
+doc += screen("Tools", "Disk space and system helpers", "".join([
+    action("filelight", "Show folder sizes", "See what is filling your drive as a ring chart (Filelight). In Files you can also right-click any folder and choose Show Folder Sizes.",
+           "nohup setsid filelight \"$HOME\" >&/dev/null"),
+    action("forcequit", "Force quit an app", "End an app that has stopped responding. Shortcut: Ctrl+Alt+Esc.",
+           "nohup setsid /usr/libexec/kantanos/force-quit >&/dev/null"),
+]) + "".join(app(*a) for a in TOOLS))
 doc += screen("Display & Sound", "HDR and surround sound", "".join([
     action("hdr-on", "Turn HDR on", "Enables HDR and wide colour on every connected display that supports it.",
            f"ujust kantan-hdr-on; {PAUSE}"),

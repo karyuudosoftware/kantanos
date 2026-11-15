@@ -57,6 +57,40 @@ kantan-hdmi-keepalive STATE="status":
             wpctl status 2>/dev/null | sed -n '/Sinks:/,/Sources:/p' | head -8 ;;
     esac
 
+# Connect shares from a NAS so they work like normal folders in every app
+kantan-nas-connect:
+    #!/usr/bin/bash
+    sudo /usr/libexec/kantanos/nas-connect
+
+# Show the NAS shares that are connected
+kantan-nas-list:
+    #!/usr/bin/bash
+    /usr/libexec/kantanos/nas-connect list
+
+# Disconnect all NAS shares set up with kantan-nas-connect
+kantan-nas-remove:
+    #!/usr/bin/bash
+    sudo /usr/libexec/kantanos/nas-connect remove
+
+# What another device needs to wake this PC over the network (Wake-on-LAN)
+kantan-wake-info:
+    #!/usr/bin/bash
+    found=0
+    for dev in $(nmcli -t -f DEVICE,TYPE device | awk -F: '$2=="ethernet"{print $1}'); do
+        found=1
+        mac=$(cat "/sys/class/net/$dev/address")
+        wol=$(nmcli -g 802-3-ethernet.wake-on-lan connection show "$(nmcli -g GENERAL.CONNECTION device show "$dev")" 2>/dev/null)
+        ip=$(nmcli -g IP4.ADDRESS device show "$dev" | head -n1)
+        echo "Network port $dev"
+        echo "  MAC address (enter this in your wake-up app): $mac"
+        echo "  IP address on your network: ${ip:-not connected}"
+        echo "  Wake-on-LAN: ${wol:-default (on)}"
+    done
+    [ "$found" = 1 ] || { echo "No wired network port found. Wake-on-LAN needs a network cable."; exit 1; }
+    echo
+    echo "Also needed, once, in the BIOS: turn on \"Wake on LAN\" (sometimes \"Power On By PCI-E\")"
+    echo "and turn off \"ErP\", or the network port has no power while the PC is off."
+
 # Show the KantanOS version and the Bazzite base it was built from
 kantan-version:
     #!/usr/bin/bash

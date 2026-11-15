@@ -14,6 +14,21 @@ screens:
         description: "Japanese input is already installed. Press Ctrl+Space in any text box to switch between English and Japanese."
         default: false
         script: "nohup setsid fcitx5-configtool >&/dev/null"
+      - id: "phone"
+        title: "Connect your Android phone"
+        description: "See phone notifications on the PC, share files and the clipboard, use the phone as a remote. Install KDE Connect on the phone from the Play Store, then pair it here."
+        default: false
+        script: "nohup setsid kdeconnect-app >&/dev/null"
+      - id: "nas"
+        title: "Connect your NAS"
+        description: "Make the shared folders on your NAS (for example a TrueNAS box) work like normal folders in every app. Asks for the NAS user name and password once."
+        default: false
+        script: "ujust kantan-nas-connect; echo; echo \"Press Enter to close...\"; read -r _"
+      - id: "wake"
+        title: "Wake this PC from another device"
+        description: "Shows the details a wake-up app needs to switch this PC on over the network (Wake-on-LAN)."
+        default: false
+        script: "ujust kantan-wake-info; echo; echo \"Press Enter to close...\"; read -r _"
       - id: "update"
         title: "Check for updates"
         description: "Update KantanOS and your apps. A restart applies system updates; the previous version stays available as a fallback."
@@ -256,6 +271,31 @@ screens:
           - id: "remove-app"
             label: "Remove Telegram"
             script: "kantan-app uninstall org.telegram.desktop"
+  - title: "Tools"
+    description: "Disk space and system helpers"
+    actions:
+      - id: "filelight"
+        title: "Show folder sizes"
+        description: "See what is filling your drive as a ring chart (Filelight). In Files you can also right-click any folder and choose Show Folder Sizes."
+        default: false
+        script: "nohup setsid filelight \"$HOME\" >&/dev/null"
+      - id: "forcequit"
+        title: "Force quit an app"
+        description: "End an app that has stopped responding. Shortcut: Ctrl+Alt+Esc."
+        default: false
+        script: "nohup setsid /usr/libexec/kantanos/force-quit >&/dev/null"
+      - id: "qdirstat"
+        title: "QDirStat"
+        description: "See which folders use the most space, as a sorted list (like TreeSize on Windows)."
+        default: false
+        status_script: "kantan-app status com.github.shundhammer.qdirstat"
+        options:
+          - id: "uninstall"
+            label: "Install QDirStat"
+            script: "kantan-app install com.github.shundhammer.qdirstat"
+          - id: "remove-app"
+            label: "Remove QDirStat"
+            script: "kantan-app uninstall com.github.shundhammer.qdirstat"
   - title: "Display & Sound"
     description: "HDR and surround sound"
     actions:

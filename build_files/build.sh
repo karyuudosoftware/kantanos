@@ -82,14 +82,15 @@ sed -i 's|^LookAndFeelPackage=.*|LookAndFeelPackage=org.kantanos.desktop|' /etc/
 sed -i 's|^font=Noto Sans,10|font=Inter Variable,10|; s|^menuFont=Noto Sans,10|menuFont=Inter Variable,10|; s|^toolBarFont=Noto Sans,9|toolBarFont=Inter Variable,9|; s|^smallestReadableFont=Noto Sans,8|smallestReadableFont=Inter Variable,8|' /etc/xdg/kdeglobals
 
 # Lock screen and login screen use the KantanOS wallpaper too.
-cat > /etc/xdg/kscreenlockerrc <<'EOF'
+LOCK_IMAGE="/usr/share/kantanos/looks/$(cat /usr/share/kantanos/looks/default)/lock.png"
+cat > /etc/xdg/kscreenlockerrc <<EOF
 [Greeter][Wallpaper][org.kde.image][General]
-Image=/usr/share/wallpapers/KantanOS/contents/images/3840x2160.png
-PreviewImage=/usr/share/wallpapers/KantanOS/contents/images/3840x2160.png
+Image=${LOCK_IMAGE}
+PreviewImage=${LOCK_IMAGE}
 EOF
 
 # Login screen (Plasma Login Manager) wallpaper.
-sed -i 's|file:///usr/share/backgrounds/default.jxl|file:///usr/share/wallpapers/KantanOS/contents/images/3840x2160.png|g' /usr/lib/plasmalogin/defaults.conf
+sed -i "s|file:///usr/share/backgrounds/default.jxl|file://${LOCK_IMAGE}|g" /usr/lib/plasmalogin/defaults.conf
 
 # No Bazzite announcements, and Steam does not start by itself at login.
 rm -f /etc/skel/.config/autostart/steam.desktop /etc/xdg/autostart/bazzite-announcement.desktop
