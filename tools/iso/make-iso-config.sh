@@ -33,6 +33,11 @@ bootloader --append="rhgb quiet"
 # Language and time zone are deliberately not preset: the installer asks for them.
 keyboard --xlayouts='us'
 
+# No root login. With root locked here, the installer greys out its Root Account page and
+# will not start until a normal (administrator) user account has been created, so nobody
+# ends up logged in as root (Steam and other apps refuse to run as root).
+rootpw --lock
+
 # KantanOS look for the installer (runs before the installer window opens)
 %pre --interpreter=/usr/bin/python3
 import base64, os

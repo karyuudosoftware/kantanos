@@ -1,0 +1,15 @@
+#!/usr/bin/bash
+# Switches an installed system to the Windows-style local hardware clock, once.
+# The installer writes /etc/adjtime with UTC; KantanOS wants LOCAL so that Windows and
+# KantanOS agree on the time on PCs that keep Windows.
+set -u
+MARK=/var/lib/kantanos/local-clock-set
+if ! grep -qx LOCAL /etc/adjtime 2>/dev/null; then
+    printf '0.0 0 0.0\n0\nLOCAL\n' > /etc/adjtime.kantanos && mv -f /etc/adjtime.kantanos /etc/adjtime || exit 1
+    restorecon /etc/adjtime 2>/dev/null || true
+    echo "hardware clock now read as local time"
+    # Correct the time for this boot too; from the next boot systemd does this by itself.
+    # Best effort: some clock chips (and virtual machines) do not answer quickly.
+    timeout 10 hwclock --hctosys --localtime 2>/dev/null || echo "clock read skipped; corrected at the next start or by the internet time sync"
+fi
+mkdir -p /var/lib/kantanos && touch "$MARK"

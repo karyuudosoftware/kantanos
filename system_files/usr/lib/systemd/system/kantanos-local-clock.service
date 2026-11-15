@@ -1,0 +1,19 @@
+[Unit]
+Description=KantanOS: keep the hardware clock in local time, like Windows (once)
+# The image ships /etc/adjtime set to LOCAL, but the installer writes its own (UTC) during
+# installation. This switches such systems over once, early in boot, and reads the clock
+# as local time at the same moment so the shown time is right straight away.
+# Done once only: someone who later chooses UTC on purpose keeps that choice.
+ConditionPathExists=!/var/lib/kantanos/local-clock-set
+DefaultDependencies=no
+After=local-fs.target
+Before=time-set.target chronyd.service systemd-timesyncd.service sysinit.target
+Wants=time-set.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/kantanos/local-clock
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

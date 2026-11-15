@@ -58,12 +58,14 @@ check "starter apps wait and run at idle priority" "grep -q IOSchedulingClass=id
 check "login display server has a long start limit" "grep -q TimeoutStartSec=300 /usr/lib/systemd/user/plasma-login-kwin_wayland.service.d/10-kantanos.conf && test -f /usr/lib/systemd/user/plasma-login-kwin_wayland.service"
 check "bluetooth boot argument is built in" "grep -q bluetooth.disable_ertm=1 /usr/lib/bootc/kargs.d/10-kantanos.toml"
 check "Welcome suggests Install, never Remove"   "! grep -q -E id:.\"install\" /usr/share/yafti/yafti.yml && grep -q remove-app /usr/share/yafti/yafti.yml"
+check "installed systems switched to local clock once" "systemctl is-enabled kantanos-local-clock.service && test -x /usr/sbin/hwclock -o -x /usr/bin/hwclock"
 check "hardware clock in local time (like Windows)" "grep -qx LOCAL /etc/adjtime"
 check "app installs wait for other downloads"      "grep -q wait_for_others /usr/bin/kantan-app && grep -q yield_to_user /usr/libexec/kantanos/flatpak-setup"
 check "daily update timer enabled"      "systemctl is-enabled uupd.timer"
 check "update recipes parse"                "just --justfile /usr/share/ublue-os/justfile --list | grep -q kantan-undo-update"
 . /usr/lib/os-release
 if [ -n "$KANTAN_IMAGE" ]; then
+check "image label says latest, banner says KantanOS" "jq -e \".\\\"image-tag\\\" == \\\"latest\\\"\" /usr/share/ublue-os/image-info.json && grep -q KantanOS /usr/share/ublue-os/motd/template.md"
 check "image knows its update address"      "grep -q \"docker://$KANTAN_IMAGE\" /usr/share/ublue-os/image-info.json"
 check "signing public key present"          "grep -q \"BEGIN PUBLIC KEY\" /etc/pki/containers/kantanos.pub"
 check "only signed updates are accepted"    "jq -e --arg r \"$KANTAN_IMAGE\" \".transports.docker[\\\$r][0].type == \\\"sigstoreSigned\\\"\" /etc/containers/policy.json"

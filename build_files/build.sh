@@ -45,7 +45,9 @@ EOF
 # images from it.
 if [ -n "$KANTAN_IMAGE" ]; then
     INFO=/usr/share/ublue-os/image-info.json
-    jq --arg ref "ostree-image-signed:docker://${KANTAN_IMAGE}" '."image-ref" = $ref' "$INFO" > /tmp/info.json
+    # The terminal banner and the base's helper commands read these: name the KantanOS
+    # image and the tag it is published under (latest), not the base's "stable".
+    jq --arg ref "ostree-image-signed:docker://${KANTAN_IMAGE}"        --arg name "${KANTAN_IMAGE##*/}" --arg vendor "$(cut -d/ -f2 <<<"$KANTAN_IMAGE")"        '."image-ref" = $ref | ."image-name" = $name | ."image-vendor" = $vendor | ."image-tag" = "latest" | ."image-branch" = "latest"'        "$INFO" > /tmp/info.json
     install -m 0644 /tmp/info.json "$INFO"
     if [ -f /etc/pki/containers/kantanos.pub ]; then
         jq --arg repo "$KANTAN_IMAGE" '.transports.docker[$repo] = [{
@@ -105,6 +107,9 @@ sed -i -e '/^Name\[/d' -e '/^Comment\[/d' -e 's|^Keywords=.*|Keywords=kantanos;w
 # rule for its opening size, and files-setup for the sidebar.
 sed -i -e 's|^Name=Dolphin$|Name=Files|' -e 's|^GenericName=File Manager$|GenericName=File Manager (Dolphin)|' \
     /usr/share/applications/org.kde.dolphin.desktop
+
+# Installed systems get the Windows-style local hardware clock once (the installer writes UTC).
+systemctl enable kantanos-local-clock.service
 
 # Starter apps (browser, viewers, media player) are installed on first boot.
 systemctl enable kantanos-flatpak-setup.service
