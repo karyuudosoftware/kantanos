@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0 http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+  <group name="General">
+    <entry name="launchers" type="StringList">
+      <label>Apps pinned to the dock (applications:name.desktop)</label>
+      <default></default>
+    </entry>
+    <entry name="magnification" type="Double">
+      <label>How big the icon under the pointer grows (1 = no magnification)</label>
+      <default>1.6</default>
+    </entry>
+    <entry name="showTrash" type="Bool">
+      <default>true</default>
+    </entry>
+  </group>
+</kcfg>

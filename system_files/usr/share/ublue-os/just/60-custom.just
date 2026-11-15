@@ -28,7 +28,34 @@ kantan-audio-71:
         echo "No HDMI device offering 7.1 was found. Turn the receiver on first, then run this again."
         exit 1
     fi
-    echo "Done. Test the speakers in System Settings > Sound."
+    echo "Done. Test each speaker with: ujust kantan-speaker-test"
+
+# Say each speaker's name from that speaker, one at a time ("Front Left", "Side Right", ...)
+kantan-speaker-test:
+    #!/usr/bin/bash
+    sink="$(pactl get-default-sink)"
+    ch="$(pactl -f json list sinks | jq -r --arg s "$sink" '.[] | select(.name == $s) | .sample_specification' | grep -o '[0-9]ch' | tr -dc '0-9')"
+    ch="${ch:-8}"
+    echo "Output: $sink ($ch channels)"
+    echo "Each speaker says its own name. If a name comes from the wrong speaker, or from"
+    echo "two speakers at once, note which; then check the receiver's listening mode."
+    speaker-test -D pipewire -c "$ch" -t wav -l 1 2>&1 | grep -E "^ ?[0-9] - " || true
+
+# Keep HDMI audio awake so an AV receiver never misses the start of a sound (on by default)
+kantan-hdmi-keepalive STATE="status":
+    #!/usr/bin/bash
+    f="${XDG_CONFIG_HOME:-$HOME/.config}/wireplumber/wireplumber.conf.d/61-kantanos-hdmi-keepalive-off.conf"
+    case "{{STATE}}" in
+        off)
+            mkdir -p "$(dirname "$f")"
+            printf 'monitor.alsa.rules = [\n  {\n    matches = [\n      { node.name = "~alsa_output.*hdmi.*" }\n      { node.name = "~alsa_output.*HDMI.*" }\n      { node.name = "~alsa_output.*displayport.*" }\n    ]\n    actions = { update-props = { session.suspend-timeout-seconds = 5, dither.noise = 0 } }\n  }\n]\n' > "$f"
+            systemctl --user restart wireplumber && echo "HDMI keep-awake is off." ;;
+        on)
+            rm -f "$f"; systemctl --user restart wireplumber && echo "HDMI keep-awake is on." ;;
+        *)
+            [ -f "$f" ] && echo "HDMI keep-awake: off" || echo "HDMI keep-awake: on"
+            wpctl status 2>/dev/null | sed -n '/Sinks:/,/Sources:/p' | head -8 ;;
+    esac
 
 # Show the KantanOS version and the Bazzite base it was built from
 kantan-version:

@@ -1,0 +1,15 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [ { "Name": "KantanOS (built with Claude)" } ],
+        "Category": "Windows and Tasks",
+        "Description": "macOS-style dock: pinned and open apps that magnify as the pointer moves over them",
+        "Icon": "kantanos",
+        "Id": "org.kantanos.dock",
+        "License": "GPL-2.0-or-later",
+        "Name": "KantanOS Dock",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-Provides": [ "org.kde.plasma.multitasking" ]
+}

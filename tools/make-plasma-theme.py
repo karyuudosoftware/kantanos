@@ -55,12 +55,26 @@ def frame(prefix, x0, y0, fill_attr, edge_opacity):
     return "\n  ".join(out)
 
 
+def dock_mask():
+    """Blur mask for the see-through dock panel. An empty mask makes the window manager blur
+    the whole panel (a faint box around the dock), so the mask is solid in exactly one pixel,
+    at the panel's top-left corner (corners are never stretched): effectively no blur."""
+    m = frame("mask-south-", 110, 110, 'fill="#000000" fill-opacity="0"', 0)
+    return m.replace('<g id="mask-south-topleft">',
+                     '<g id="mask-south-topleft"><rect x="110" y="110" width="1" height="1" fill="#000000"/>', 1)
+
+
 def svg(fill_opacity, edge_opacity):
     fill = f'class="ColorScheme-Background" fill="currentColor" fill-opacity="{fill_opacity}"'
     hints = "\n  ".join(
         f'<rect id="hint-{side}-margin" x="{200 + i * 12}" y="10" width="{MARGIN}" height="{MARGIN}" fill="#ff00ff" opacity="0"/>'
         for i, side in enumerate(("top", "bottom", "left", "right")))
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200">
+    # The dock's see-through pieces need their own (tiny) margins, or Plasma uses the corner
+    # size as padding and the dock widget loses a third of the panel's height.
+    hints += "\n  " + "\n  ".join(
+        f'<rect id="south-hint-{side}-margin" x="{200 + i * 12}" y="120" width="1" height="1" fill="#ff00ff" opacity="0"/>'
+        for i, side in enumerate(("top", "bottom", "left", "right")))
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="320" height="300" viewBox="0 0 320 300">
   <defs>
     <style id="current-color-scheme" type="text/css">
       .ColorScheme-Text {{ color:#fcfcfc; }}
@@ -71,6 +85,10 @@ def svg(fill_opacity, edge_opacity):
   {frame("", 10, 10, fill, edge_opacity)}
   <!-- mask: the area that gets blurred behind the panel -->
   {frame("mask-", 110, 10, 'fill="#000000"', 0)}
+  <!-- bottom panel (the dock): fully see-through. The KantanOS Dock draws its own glass bar,
+       so its icons can grow upward out of the bar when they magnify. -->
+  {frame("south-", 10, 110, 'fill="#000000" fill-opacity="0"', 0)}
+  {dock_mask()}
   <!-- content margins -->
   {hints}
   <!-- stretch the edge pieces instead of tiling them (tiling shows seams) -->

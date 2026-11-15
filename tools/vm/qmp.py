@@ -74,6 +74,20 @@ def main():
         for down in (True, False):
             q.cmd("input-send-event", events=[{"type": "btn", "data": {"down": down, "button": "left"}}])
             time.sleep(0.1)
+    elif op == "rclick":   # rclick x y   (right button)
+        x, y = int(sys.argv[2]), int(sys.argv[3])
+        q.cmd("input-send-event", events=[
+            {"type": "abs", "data": {"axis": "x", "value": x * 32767 // 1920}},
+            {"type": "abs", "data": {"axis": "y", "value": y * 32767 // 1080}}])
+        time.sleep(0.2)
+        for down in (True, False):
+            q.cmd("input-send-event", events=[{"type": "btn", "data": {"down": down, "button": "right"}}])
+            time.sleep(0.1)
+    elif op == "move":   # move x y   (pointer only, no click)
+        x, y = int(sys.argv[2]), int(sys.argv[3])
+        q.cmd("input-send-event", events=[
+            {"type": "abs", "data": {"axis": "x", "value": x * 32767 // 1920}},
+            {"type": "abs", "data": {"axis": "y", "value": y * 32767 // 1080}}])
     elif op == "drag":   # drag x1 y1 x2 y2
         x1, y1, x2, y2 = (int(v) for v in sys.argv[2:6])
         def move(x, y):

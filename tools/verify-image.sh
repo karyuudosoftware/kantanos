@@ -61,7 +61,13 @@ check "Welcome suggests Install, never Remove"   "! grep -q -E id:.\"install\" /
 check "installed systems switched to local clock once" "systemctl is-enabled kantanos-local-clock.service && test -x /usr/sbin/hwclock -o -x /usr/bin/hwclock"
 check "hardware clock in local time (like Windows)" "grep -qx LOCAL /etc/adjtime"
 check "app installs wait for other downloads"      "grep -q wait_for_others /usr/bin/kantan-app && grep -q yield_to_user /usr/libexec/kantanos/flatpak-setup"
-check "daily update timer enabled"      "systemctl is-enabled uupd.timer"
+check "HDMI audio keep-awake rule present"  "grep -q suspend-timeout-seconds.=.0 /usr/share/wireplumber/wireplumber.conf.d/60-kantanos-hdmi-keepalive.conf"
+check "speaker test recipes parse"         "just --justfile /usr/share/ublue-os/justfile --list | grep -q kantan-speaker-test && just --justfile /usr/share/ublue-os/justfile --list | grep -q kantan-hdmi-keepalive"
+check "KantanOS Dock widget installed"      "test -s /usr/share/plasma/plasmoids/org.kantanos.dock/contents/ui/main.qml && jq -e .KPlugin.Id /usr/share/plasma/plasmoids/org.kantanos.dock/metadata.json"
+check "new layout uses the KantanOS Dock"   "grep -q org.kantanos.dock /usr/share/plasma/look-and-feel/org.kantanos.desktop/contents/layouts/org.kde.plasma.desktop-layout.js"
+check "existing accounts get the new dock"  "test -s /usr/share/plasma/shells/org.kde.plasma.desktop/contents/updates/kantanos-dock-1.js"
+check "dock panel is see-through, no blur"  "grep -q south-center /usr/share/plasma/desktoptheme/KantanGlass/translucent/widgets/panel-background.svg && grep -q south-hint-top-margin /usr/share/plasma/desktoptheme/KantanGlass/translucent/widgets/panel-background.svg"
+check "daily update timer enabled"    "systemctl is-enabled uupd.timer"
 check "update recipes parse"                "just --justfile /usr/share/ublue-os/justfile --list | grep -q kantan-undo-update"
 . /usr/lib/os-release
 if [ -n "$KANTAN_IMAGE" ]; then

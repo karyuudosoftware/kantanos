@@ -1,6 +1,7 @@
 # Boots the KantanOS test disk in QEMU for Windows with hypervisor (WHPX) acceleration.
 # Headless: control it with qmp.py (tcp 4444) and serial.py (tcp 4445).
-param([string]$Cpu = 'max', [int]$Cpus = 8, [string]$Ram = '8G')
+#   -Audio   add a sound card (silent: its sound goes nowhere) for audio-setting tests
+param([string]$Cpu = 'max', [int]$Cpus = 8, [string]$Ram = '8G', [switch]$Audio)
 $q = 'C:\Program Files\qemu'
 $d = 'D:\CLAUDE_Projects\kantanos\output\vm'
 if (-not (Test-Path "$d\vars.fd")) { Copy-Item "$q\share\edk2-i386-vars.fd" "$d\vars.fd" }
@@ -17,7 +18,9 @@ $a = @(
     '-qmp tcp:127.0.0.1:4444,server=on,wait=off',
     "-chardev socket,id=ser0,host=127.0.0.1,port=4445,server=on,wait=off,logfile=$d\serial.log",
     '-serial chardev:ser0'
-) -join ' '
+)
+if ($Audio) { $a += '-audiodev none,id=snd0'; $a += '-device ich9-intel-hda'; $a += '-device hda-output,audiodev=snd0' }
+$a = $a -join ' '
 $p = Start-Process -FilePath "$q\qemu-system-x86_64.exe" -ArgumentList $a -PassThru -WindowStyle Hidden -RedirectStandardError "$d\qemu-err.txt"
 $p.Id | Out-File -Encoding ascii "$d\qemu.pid"
 Start-Sleep -Seconds 4
