@@ -38,7 +38,7 @@ What is done, what is next, and the ideas waiting their turn. Updated as work la
 ## Entertainment and games
 
 - [ ] **Watch TV:** a custom TV app built from the family's own TV projects (no Kodi).
-- [ ] **Game Mode:** GOG, Epic, EA and Ubisoft libraries next to Steam.
+- [~] **Game Mode:** Welcome → Games installs Heroic (Epic, GOG, Amazon → "Add to Steam") and points to Lutris for EA/Ubisoft; automatic library sync still to do.
 - [ ] **Retro Games:** RetroDECK set up as a LaunchBox replacement, emulator library on the
       NAS (NFS rather than iSCSI).
 - [ ] **Vintage Computers:** DOS, Windows 3.x–98, classic Mac OS, Amiga, C64, Atari ST and

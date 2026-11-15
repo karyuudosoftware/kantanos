@@ -33,6 +33,10 @@ CHAT = [
     ("org.signal.Signal", "Signal", "Private messaging."),
     ("org.telegram.desktop", "Telegram", "Messaging."),
 ]
+GAMES = [
+    ("com.heroicgameslauncher.hgl", "Heroic Games Launcher", "Epic Games Store, GOG and Amazon Prime Gaming. In Heroic, open a game's menu and choose \"Add to Steam\" to see it in Game Mode."),
+    ("net.retrodeck.retrodeck", "RetroDECK", "Classic consoles in one app (the Retro Games tile). You supply your own game files; it can read them from the NAS."),
+]
 TOOLS = [
     ("com.github.shundhammer.qdirstat", "QDirStat", "See which folders use the most space, as a sorted list (like TreeSize on Windows)."),
 ]
@@ -110,6 +114,12 @@ doc += screen("Creative", "Photos, drawing, video and audio", "".join(app(*a) fo
     "artcraft", "ArtCraft", "Free creative and office apps (still in development). Opens the ArtCraft website, where you can get its launcher.",
     "xdg-open https://getartcraft.com/"))
 doc += screen("Media & Chat", "Players and messaging", "".join(app(*a) for a in MEDIA + CHAT))
+doc += screen("Games", "Game stores and classic consoles", "".join(app(*a) for a in GAMES) + "".join([
+    action("lutris", "EA app, Ubisoft Connect, Battle.net", "Lutris is already installed. Search for the store in Lutris and choose Install; it then adds its games to your library. Games with anti-cheat may not run on Linux.",
+           "nohup setsid lutris >&/dev/null"),
+    action("gamemode", "Open Game Mode", "Your whole library, full screen, for a controller (Steam Big Picture).",
+           "nohup setsid steam steam://open/bigpicture >&/dev/null"),
+]))
 doc += screen("Tools", "Disk space and system helpers", "".join([
     action("filelight", "Show folder sizes", "See what is filling your drive as a ring chart (Filelight). In Files you can also right-click any folder and choose Show Folder Sizes.",
            "nohup setsid filelight \"$HOME\" >&/dev/null"),
