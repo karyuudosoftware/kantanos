@@ -33,10 +33,9 @@ bootloader --append="rhgb quiet"
 # Language and time zone are deliberately not preset: the installer asks for them.
 keyboard --xlayouts='us'
 
-# No root login. With root locked here, the installer greys out its Root Account page and
-# will not start until a normal (administrator) user account has been created, so nobody
-# ends up logged in as root (Steam and other apps refuse to run as root).
-rootpw --lock
+# Do NOT add "rootpw --lock" here: tested 2026-11-15, it greys out the Root Account page
+# but the installer then lets you begin with no account at all (it only requires the user
+# page while the root page could still be used), leaving a PC nobody can log into.
 
 # KantanOS look for the installer (runs before the installer window opens)
 %pre --interpreter=/usr/bin/python3
