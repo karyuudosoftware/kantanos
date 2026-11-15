@@ -16,7 +16,12 @@ done
 [ -n "$PART" ] || { echo "no btrfs partition found in $IMG"; exit 1; }
 mkdir -p /mnt/kantan-img
 mount -t btrfs "$PART" /mnt/kantan-img
-ETC=$(find /mnt/kantan-img -maxdepth 6 -type d -path '*/ostree/deploy/*/deploy/*/etc' | head -1)
+# The live configuration of the deployment is <subvol>/ostree/deploy/<os>/deploy/<id>/etc
+# (not .../<id>/usr/etc, the read-only defaults). A shell glob never crosses a "/".
+ETC=""
+for d in /mnt/kantan-img/*/ostree/deploy/*/deploy/*/etc /mnt/kantan-img/ostree/deploy/*/deploy/*/etc; do
+    [ -d "$d" ] && [ -f "$d/os-release" -o -L "$d/os-release" -o -f "$d/adjtime" ] && { ETC="$d"; break; }
+done
 [ -n "$ETC" ] || { echo "no deployment found"; exit 1; }
 ln -sfn "../usr/share/zoneinfo/$ZONE" "$ETC/localtime"
 setfattr -h -n security.selinux -v "system_u:object_r:locale_t:s0" "$ETC/localtime"

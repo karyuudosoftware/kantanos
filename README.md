@@ -65,6 +65,16 @@ the version before the last update: `ujust kantan-undo-update`.
 Tested 2026-11-12: unsigned refused, signed 0.1.0 → 0.1.1 (385 MB download), undo back to
 0.1.0, and the automatic service staged 0.1.1 again.
 
+## Run-from-USB image
+
+`tools/usb/make-usb.sh [user] [time zone]` builds `output/usb/KantanOS-<version>-usb.img`
+(26.5 GiB, fits a 32 GB drive) with a baked-in account; its temporary password is in
+`output/usb/LOGIN.txt`. `tools/usb/run-usb-vm.ps1 [-Fresh]` boots it as a USB drive in the VM
+without changing the file. To read a stick's logs after a failed real-hardware boot, run
+`tools/usb/read-stick-vm.ps1` from an administrator PowerShell (it attaches the stick read-only
+to the test VM), then the `tools/usb/guest-stick-*.sh` scripts through `serial.py --root-script`.
+A USB 2 stick is too slow for this OS; use USB 3 or, better, an SSD.
+
 ## What is in the image
 
 - KantanOS identity: name, logo, boot splash, login and lock wallpaper, hostname

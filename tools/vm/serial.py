@@ -8,7 +8,10 @@
 import base64, os, re, socket, sys, time, uuid
 
 SOCK = os.environ.get("KANTAN_SERIAL", "tcp:127.0.0.1:4445" if os.name == "nt" else "/root/kantan-out/run/serial.sock")
-USER = PASSWORD = "kantan"   # throwaway test account from tools/vm/config.toml
+# Throwaway test account from tools/vm/config.toml; KANTAN_USER / KANTAN_PASSWORD override it
+# (the run-from-USB image has its own account, see output/usb/LOGIN.txt).
+USER = os.environ.get("KANTAN_USER", "kantan")
+PASSWORD = os.environ.get("KANTAN_PASSWORD", "kantan")
 ANSI = re.compile(rb"\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]|\x1b[PX^_].*?\x1b\\|\r")
 
 
