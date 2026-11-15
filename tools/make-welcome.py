@@ -41,6 +41,10 @@ def q(text):
     return json.dumps(text, ensure_ascii=False)     # JSON strings are valid YAML strings
 
 
+# The Welcome engine highlights (and focuses) the option whose id equals the status token,
+# and words the status chip from the token: "uninstall" -> "Not installed", "install" ->
+# "Installed". So the Install button gets the id "uninstall": it is the suggested button
+# while the app is missing. "Remove" never matches, so nothing is pushed once installed.
 def app(fid, name, desc):
     slug = fid.split(".")[-1].lower()
     return f"""      - id: {q(slug)}
@@ -49,10 +53,10 @@ def app(fid, name, desc):
         default: false
         status_script: {q(f"kantan-app status {fid}")}
         options:
-          - id: "install"
+          - id: "uninstall"
             label: {q(f"Install {name}")}
             script: {q(f"kantan-app install {fid}")}
-          - id: "uninstall"
+          - id: "remove-app"
             label: {q(f"Remove {name}")}
             script: {q(f"kantan-app uninstall {fid}")}
 """

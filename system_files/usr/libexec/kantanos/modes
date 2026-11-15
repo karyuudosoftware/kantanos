@@ -87,6 +87,7 @@ STRINGS = {
         "remove": "Remove",
         "install": "Not installed yet. Select to install.",
         "installing": "Installing %1. This can take a few minutes.",
+        "queued": "Waiting for another download to finish (the starter apps), then installing %1.",
         "failed": "%1 could not be installed. Check the internet connection and try again.",
         "ok": "OK",
         "atStartup": "Show this screen at startup",
@@ -107,6 +108,7 @@ STRINGS = {
         "remove": "削除",
         "install": "まだインストールされていません。選択するとインストールします。",
         "installing": "%1 をインストールしています。数分かかることがあります。",
+        "queued": "他のダウンロード（スターターアプリ）の完了を待ってから %1 をインストールします。",
         "failed": "%1 をインストールできませんでした。インターネット接続を確認して、もう一度お試しください。",
         "ok": "OK",
         "atStartup": "起動時にこの画面を表示する",
@@ -170,6 +172,15 @@ def read_mode(path, custom):
 def flatpak_installed(app_id):
     try:
         return subprocess.run(["flatpak", "info", app_id], capture_output=True, timeout=20).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def other_download_running():
+    """True while another Flatpak download runs (usually the first-start starter apps)."""
+    try:
+        return subprocess.run(["pgrep", "-f", r"(^|/)flatpak (install|update|uninstall)( |$)"],
+                              capture_output=True, timeout=5).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
 
@@ -271,7 +282,8 @@ class Backend(QObject):
             return
         mode = self._modes[index]
         if mode["flatpak"] and not mode["installed"]:
-            self._set_busy(self.text["installing"].replace("%1", mode["name"]))
+            key = "queued" if other_download_running() else "installing"
+            self._set_busy(self.text[key].replace("%1", mode["name"]))
             self._process = QProcess(self)
             self._process.finished.connect(lambda code, _status, m=mode: self._installed(m, code))
             self._process.errorOccurred.connect(lambda _error, m=mode: self._installed(m, 1))

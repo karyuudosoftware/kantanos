@@ -71,10 +71,10 @@ screens:
         default: false
         status_script: "kantan-app status org.libreoffice.LibreOffice"
         options:
-          - id: "install"
+          - id: "uninstall"
             label: "Install LibreOffice"
             script: "kantan-app install org.libreoffice.LibreOffice"
-          - id: "uninstall"
+          - id: "remove-app"
             label: "Remove LibreOffice"
             script: "kantan-app uninstall org.libreoffice.LibreOffice"
       - id: "notepadnext"
@@ -83,10 +83,10 @@ screens:
         default: false
         status_script: "kantan-app status com.github.dail8859.NotepadNext"
         options:
-          - id: "install"
+          - id: "uninstall"
             label: "Install NotepadNext"
             script: "kantan-app install com.github.dail8859.NotepadNext"
-          - id: "uninstall"
+          - id: "remove-app"
             label: "Remove NotepadNext"
             script: "kantan-app uninstall com.github.dail8859.NotepadNext"
       - id: "thunderbird"
@@ -95,10 +95,10 @@ screens:
         default: false
         status_script: "kantan-app status org.mozilla.Thunderbird"
         options:
-          - id: "install"
+          - id: "uninstall"
             label: "Install Thunderbird"
             script: "kantan-app install org.mozilla.Thunderbird"
-          - id: "uninstall"
+          - id: "remove-app"
             label: "Remove Thunderbird"
             script: "kantan-app uninstall org.mozilla.Thunderbird"
   - title: "Creative"
@@ -110,10 +110,10 @@ screens:
         default: false
         status_script: "kantan-app status org.kde.krita"
         options:
-          - id: "install"
+          - id: "uninstall"
             label: "Install Krita"
             script: "kantan-app install org.kde.krita"
-          - id: "uninstall"
+          - id: "remove-app"
             label: "Remove Krita"
             script: "kantan-app uninstall org.kde.krita"
       - id: "gimp"
@@ -122,10 +122,10 @@ screens:
         default: false
         status_script: "kantan-app status org.gimp.GIMP"
         options:
-          - id: "install"
+          - id: "uninstall"
             label: "Install GIMP"
             script: "kantan-app install org.gimp.GIMP"
-          - id: "uninstall"
+          - id: "remove-app"
             label: "Remove GIMP"
             script: "kantan-app uninstall org.gimp.GIMP"
       - id: "inkscape"
@@ -134,10 +134,10 @@ screens:
         default: false
         status_script: "kantan-app status org.inkscape.Inkscape"
         options:
-          - id: "install"
+          - id: "uninstall"
             label: "Install Inkscape"
             script: "kantan-app install org.inkscape.Inkscape"
-          - id: "uninstall"
+          - id: "remove-app"
             label: "Remove Inkscape"
             script: "kantan-app uninstall org.inkscape.Inkscape"
       - id: "kdenlive"
@@ -146,10 +146,10 @@ screens:
         default: false
         status_script: "kantan-app status org.kde.kdenlive"
         options:
-          - id: "install"
+          - id: "uninstall"
             label: "Install Kdenlive"
             script: "kantan-app install org.kde.kdenlive"
-          - id: "uninstall"
+          - id: "remove-app"
             label: "Remove Kdenlive"
             script: "kantan-app uninstall org.kde.kdenlive"
       - id: "darktable"
@@ -158,10 +158,10 @@ screens:
         default: false
         status_script: "kantan-app status org.darktable.Darktable"
         options:
-          - id: "install"
+          - id: "uninstall"
             label: "Install darktable"
             script: "kantan-app install org.darktable.Darktable"
-          - id: "uninstall"
+          - id: "remove-app"
             label: "Remove darktable"
             script: "kantan-app uninstall org.darktable.Darktable"
       - id: "audacity"
@@ -170,10 +170,10 @@ screens:
         default: false
         status_script: "kantan-app status org.audacityteam.Audacity"
         options:
-          - id: "install"
+          - id: "uninstall"
             label: "Install Audacity"
             script: "kantan-app install org.audacityteam.Audacity"
-          - id: "uninstall"
+          - id: "remove-app"
             label: "Remove Audacity"
             script: "kantan-app uninstall org.audacityteam.Audacity"
       - id: "blender"
@@ -182,10 +182,10 @@ screens:
         default: false
         status_script: "kantan-app status org.blender.Blender"
         options:
-          - id: "install"
+          - id: "uninstall"
             label: "Install Blender"
             script: "kantan-app install org.blender.Blender"
-          - id: "uninstall"
+          - id: "remove-app"
             label: "Remove Blender"
             script: "kantan-app uninstall org.blender.Blender"
       - id: "artcraft"
@@ -202,10 +202,10 @@ screens:
         default: false
         status_script: "kantan-app status org.videolan.VLC"
         options:
-          - id: "install"
+          - id: "uninstall"
             label: "Install VLC"
             script: "kantan-app install org.videolan.VLC"
-          - id: "uninstall"
+          - id: "remove-app"
             label: "Remove VLC"
             script: "kantan-app uninstall org.videolan.VLC"
       - id: "haruna"
@@ -214,10 +214,10 @@ screens:
         default: false
         status_script: "kantan-app status org.kde.haruna"
         options:
-          - id: "install"
+          - id: "uninstall"
             label: "Install Haruna"
             script: "kantan-app install org.kde.haruna"
-          - id: "uninstall"
+          - id: "remove-app"
             label: "Remove Haruna"
             script: "kantan-app uninstall org.kde.haruna"
       - id: "elisa"
@@ -226,10 +226,10 @@ screens:
         default: false
         status_script: "kantan-app status org.kde.elisa"
         options:
-          - id: "install"
+          - id: "uninstall"
             label: "Install Elisa"
             script: "kantan-app install org.kde.elisa"
-          - id: "uninstall"
+          - id: "remove-app"
             label: "Remove Elisa"
             script: "kantan-app uninstall org.kde.elisa"
       - id: "signal"
@@ -238,10 +238,10 @@ screens:
         default: false
         status_script: "kantan-app status org.signal.Signal"
         options:
-          - id: "install"
+          - id: "uninstall"
             label: "Install Signal"
             script: "kantan-app install org.signal.Signal"
-          - id: "uninstall"
+          - id: "remove-app"
             label: "Remove Signal"
             script: "kantan-app uninstall org.signal.Signal"
       - id: "desktop"
@@ -250,10 +250,10 @@ screens:
         default: false
         status_script: "kantan-app status org.telegram.desktop"
         options:
-          - id: "install"
+          - id: "uninstall"
             label: "Install Telegram"
             script: "kantan-app install org.telegram.desktop"
-          - id: "uninstall"
+          - id: "remove-app"
             label: "Remove Telegram"
             script: "kantan-app uninstall org.telegram.desktop"
   - title: "Display & Sound"

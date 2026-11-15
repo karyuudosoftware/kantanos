@@ -9,12 +9,24 @@ mkdir -p /var/lib/kantanos
 flatpak remote-add --if-not-exists --system flathub https://dl.flathub.org/repo/flathub.flatpakrepo || true
 flatpak remote-modify --system --enable flathub || true
 
+# Let an install the person asked for (Welcome app or mode chooser) go first: before each
+# starter app, wait while one is queued or running.
+yield_to_user() {
+    local waited=0
+    while pgrep -f 'kantan-app (install|uninstall) ' >/dev/null; do
+        [ "$waited" = 0 ] && echo "Pausing: an app install was requested; continuing afterwards."
+        waited=1
+        sleep 5
+    done
+}
+
 failed=0
 while read -r app; do
     case "$app" in ''|'#'*) continue ;; esac
     if flatpak info --system "$app" >/dev/null 2>&1; then
         continue
     fi
+    yield_to_user
     echo "Installing $app"
     flatpak install --system --noninteractive --or-update flathub "$app" || failed=1
 done < "$LIST"

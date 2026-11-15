@@ -2,7 +2,7 @@
 # Builds a run-from-USB KantanOS: a raw disk image that is written straight to a USB drive
 # (32 GB or larger) and booted, with no installer. Changes are kept on the drive.
 #
-#   make-usb.sh [username]        default username: admin
+#   make-usb.sh [username] [time zone]     defaults: admin, America/Toronto
 #
 # There is no installer to create an account, so one is baked in. Its temporary password is
 # generated here, written to output/usb/LOGIN.txt (not in git) and only its hash goes into
@@ -11,6 +11,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "$HERE/../image-ref.sh"
 USERNAME="${1:-admin}"
+TIMEZONE="${2:-America/Toronto}"
 DEST="$HERE/../../output/usb"
 WORK=/root/kantan-usb
 mkdir -p "$DEST"
@@ -46,6 +47,7 @@ podman run --rm --privileged --pull=newer \
     --type raw --rootfs btrfs \
     "$LOCAL_IMAGE:latest" > /root/usb.log 2>&1 || { tail -40 /root/usb.log; exit 1; }
 rm -f "$WORK/config.toml"
+bash "$HERE/set-timezone.sh" "$WORK/image/disk.raw" "$TIMEZONE"
 
 VERSION=$(podman run --rm --entrypoint bash "$LOCAL_IMAGE:latest" -c '. /usr/lib/os-release; echo "$KANTAN_VERSION-$KANTAN_BUILD"')
 OUT="$DEST/KantanOS-$VERSION-usb.img"

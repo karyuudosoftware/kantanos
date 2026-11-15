@@ -1,14 +1,42 @@
 #!/usr/bin/bash
 # kantan-app status|install|uninstall <flatpak-id>
-# Small helper used by KantanOS Welcome to manage apps from Flathub.
+# Small helper used by KantanOS Welcome and the mode chooser to manage apps from Flathub.
 action="${1:-}"; app="${2:-}"
 if [ -z "$action" ] || [ -z "$app" ]; then
     echo "usage: kantan-app status|install|uninstall <flatpak-id>"; exit 2
 fi
 
-# Only wait for Enter when a person is watching in a terminal (the Welcome app);
-# the mode chooser runs this in the background and must not be kept waiting.
+# A person is watching when this runs in a terminal (the Welcome app); the mode chooser
+# runs it in the background. Only the terminal gets progress bars and "press Enter".
+if [ -t 1 ]; then TTY=1; else TTY=0; fi
 pause() { if [ -t 0 ]; then echo; echo "Press Enter to close..."; read -r _; fi; }
+if [ "$TTY" = 1 ]; then QUIET=(-y); else QUIET=(--noninteractive); fi
+
+# Flatpak installs one thing at a time. If another download is running (usually the
+# starter apps that KantanOS fetches after the first start), say so and wait for it
+# instead of sitting silently. The starter-apps service, in turn, lets this install go
+# ahead before it starts its next app.
+other_download() {
+    pgrep -af '(^|/)flatpak (install|update|uninstall)( |$)' | grep -v -- " $app\$" | head -n1
+}
+wait_for_others() {
+    local first=1 started now line what
+    started=$(date +%s)
+    while line="$(other_download)" && [ -n "$line" ]; do
+        if [ "$first" = 1 ]; then
+            what="$(awk '{print $NF}' <<<"$line")"
+            echo "Another download is running first: $what"
+            echo "(KantanOS fetches its starter apps after the first start.)"
+            echo "Your install starts as soon as that one finishes."
+            first=0
+        fi
+        now=$(date +%s)
+        [ "$TTY" = 1 ] && printf '\r  waiting... %d min %02d s ' $(((now - started) / 60)) $(((now - started) % 60))
+        sleep 3
+    done
+    [ "$first" = 0 ] && [ "$TTY" = 1 ] && echo
+    return 0
+}
 
 case "$action" in
     status)
@@ -16,14 +44,16 @@ case "$action" in
         if flatpak info "$app" >/dev/null 2>&1; then echo install; else echo uninstall; fi
         ;;
     install)
+        wait_for_others
         echo "Installing $app from Flathub..."
-        flatpak install --system --noninteractive --or-update flathub "$app"; rc=$?
+        flatpak install --system "${QUIET[@]}" --or-update flathub "$app"; rc=$?
         [ $rc = 0 ] && echo "Done." || echo "Installation failed (code $rc)."
         pause; exit $rc
         ;;
     uninstall)
+        wait_for_others
         echo "Removing $app..."
-        flatpak uninstall --system --noninteractive "$app"; rc=$?
+        flatpak uninstall --system "${QUIET[@]}" "$app"; rc=$?
         [ $rc = 0 ] && echo "Done." || echo "Removal failed (code $rc)."
         pause; exit $rc
         ;;
