@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Force Quit
+Name[ja]=強制終了
+GenericName=End an app that stopped responding
+Comment=End an app that has stopped responding (Ctrl+Alt+Esc)
+Exec=/usr/libexec/kantanos/force-quit
+Icon=process-stop
+Categories=System;
+Keywords=force;quit;kill;frozen;hang;not responding;task;
+StartupNotify=false
+X-KDE-Shortcuts=Ctrl+Alt+Esc

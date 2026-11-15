@@ -1,0 +1,147 @@
+#!/usr/bin/python3
+"""KantanOS Force Quit: lists the apps that are open and ends the one you pick, at once,
+including its helper processes. Like Force Quit on a Mac (here: Ctrl+Alt+Esc).
+
+Apps started from the dock, the menu or search each run in their own systemd unit
+(app-<desktop id>@<n>.service, app-<desktop id>-<n>.scope or app-flatpak-<id>-<n>.scope),
+so ending that unit ends the whole app.
+"""
+import configparser
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+from PySide6.QtCore import Property, QObject, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtQml import QQmlApplicationEngine
+
+HERE = Path(os.environ.get("KANTAN_FORCEQUIT_DIR", "/usr/share/kantanos/force-quit"))
+SKIP = re.compile(r"(@autostart|kantanos-force-quit|plasma-|kded|xdg-|org\.kde\.kdeconnect\.daemon|geoclue)")
+LANG = (os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or "en")[:2]
+
+TEXT = {
+    "en": {"title": "Force Quit Applications",
+           "hint": "If an app has stopped responding, select it and choose Force Quit. Anything not saved in it is lost.",
+           "quit": "Force Quit", "cancel": "Cancel", "none": "No apps are open.",
+           "confirm": "Force quit %1? Anything not saved in it is lost.", "yes": "Force Quit", "no": "Cancel"},
+    "ja": {"title": "アプリケーションの強制終了",
+           "hint": "応答しなくなったアプリを選んで「強制終了」を押してください。保存していない内容は失われます。",
+           "quit": "強制終了", "cancel": "キャンセル", "none": "開いているアプリはありません。",
+           "confirm": "%1 を強制終了しますか？保存していない内容は失われます。", "yes": "強制終了", "no": "キャンセル"},
+}
+
+
+def unescape(s):
+    return re.sub(r"\\x([0-9a-fA-F]{2})", lambda m: chr(int(m.group(1), 16)), s)
+
+
+def desktop_id(unit):
+    name = unescape(unit)
+    m = re.match(r"^app-flatpak-(.+)-\d+\.scope$", name)
+    if m:
+        return m.group(1)
+    m = re.match(r"^app-(.+)@[^@]+\.service$", name) or re.match(r"^app-(.+)-[0-9a-f]+\.scope$", name)
+    return m.group(1) if m else None
+
+
+def find_desktop(did):
+    dirs = [os.path.expanduser("~/.local/share")] + os.environ.get(
+        "XDG_DATA_DIRS", "/usr/local/share:/usr/share:/var/lib/flatpak/exports/share").split(":")
+    for d in dirs + ["/var/lib/flatpak/exports/share", os.path.expanduser("~/.local/share/flatpak/exports/share")]:
+        p = Path(d) / "applications" / f"{did}.desktop"
+        if p.exists():
+            return p
+    return None
+
+
+def app_info(did):
+    name, icon = did, "application-x-executable"
+    p = find_desktop(did)
+    if p:
+        c = configparser.ConfigParser(interpolation=None, strict=False)
+        c.optionxform = str
+        try:
+            c.read(p, encoding="utf-8")
+            e = c["Desktop Entry"]
+            name = e.get(f"Name[{LANG}]", e.get("Name", did))
+            icon = e.get("Icon", icon)
+        except (configparser.Error, KeyError, UnicodeDecodeError):
+            pass
+    return name, icon
+
+
+def list_apps():
+    try:
+        out = subprocess.run(
+            ["systemctl", "--user", "list-units", "--type=service,scope", "--state=running",
+             "--no-legend", "--plain", "--output=json", "app-*"],
+            capture_output=True, text=True, timeout=10).stdout
+        units = [u["unit"] for u in json.loads(out or "[]")]
+    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
+        units = []
+    apps = {}
+    for unit in units:
+        if SKIP.search(unescape(unit)):
+            continue
+        did = desktop_id(unit)
+        if not did:
+            continue
+        name, icon = app_info(did)
+        apps.setdefault(did, {"id": did, "name": name, "icon": icon, "units": []})["units"].append(unit)
+    return sorted(apps.values(), key=lambda a: a["name"].lower())
+
+
+class Backend(QObject):
+    appsChanged = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self._apps = list_apps()
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self.refresh)
+        self._timer.start(2000)
+
+    @Property("QVariantList", notify=appsChanged)
+    def apps(self):
+        return self._apps
+
+    @Property("QVariantMap", constant=True)
+    def text(self):
+        return TEXT.get(LANG, TEXT["en"])
+
+    @Slot()
+    def refresh(self):
+        apps = list_apps()
+        if [a["id"] for a in apps] != [a["id"] for a in self._apps]:
+            self._apps = apps
+            self.appsChanged.emit()
+
+    @Slot(str)
+    def forceQuit(self, did):
+        for a in self._apps:
+            if a["id"] == did:
+                for unit in a["units"]:
+                    subprocess.run(["systemctl", "--user", "kill", "--signal=SIGKILL", unit], timeout=10)
+                    subprocess.run(["systemctl", "--user", "stop", "--no-block", unit], timeout=10)
+        QTimer.singleShot(600, self.refresh)
+
+
+def main():
+    app = QGuiApplication(sys.argv)
+    app.setApplicationName("kantanos-force-quit")
+    app.setApplicationDisplayName("Force Quit")
+    app.setDesktopFileName("kantanos-force-quit")
+    backend = Backend()
+    engine = QQmlApplicationEngine()
+    engine.rootContext().setContextProperty("backend", backend)
+    engine.load(QUrl.fromLocalFile(str(HERE / "Main.qml")))
+    if not engine.rootObjects():
+        return 1
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

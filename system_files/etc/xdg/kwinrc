@@ -4,3 +4,11 @@ InputMethod[$e]=/usr/share/applications/fcitx5-wayland-launcher.desktop
 [Plugins]
 blurEnabled=true
 contrastEnabled=true
+# macOS-like window animations: minimized windows pour into their dock icon ("genie",
+# KWin's Magic Lamp, instead of the default squash); maximize, open and close animate
+# smoothly (maximize and scale effects).
+magiclampEnabled=true
+squashEnabled=false
+maximizeEnabled=true
+scaleEnabled=true
+glideEnabled=false

@@ -1,0 +1,6 @@
+[General]
+# Spotlight-style search: a search bar in the middle of the screen (Win+Space),
+# instead of a strip dropping down from the top edge.
+FreeFloating=true
+ActivateWhenTypingOnDesktop=true
+HistoryEnabled=true

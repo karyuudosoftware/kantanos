@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Force Quit
+Name[ja]=強制終了
+Comment=End an app that has stopped responding
+Exec=/usr/libexec/kantanos/force-quit
+Icon=process-stop
+X-KDE-Shortcuts=Ctrl+Alt+Esc

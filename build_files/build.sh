@@ -108,6 +108,18 @@ sed -i -e '/^Name\[/d' -e '/^Comment\[/d' -e 's|^Keywords=.*|Keywords=kantanos;w
 sed -i -e 's|^Name=Dolphin$|Name=Files|' -e 's|^GenericName=File Manager$|GenericName=File Manager (Dolphin)|' \
     /usr/share/applications/org.kde.dolphin.desktop
 
+# Spotlight-style search: Win+Space opens it too (Cmd+Space on a Mac), besides Alt+Space.
+sed -i 's|^X-KDE-Shortcuts=Alt+Space,Alt+F2,Search$|X-KDE-Shortcuts=Meta+Space,Alt+Space,Alt+F2,Search|'     /usr/share/kglobalaccel/org.kde.krunner.desktop
+grep -q '^X-KDE-Shortcuts=Meta+Space' /usr/share/kglobalaccel/org.kde.krunner.desktop
+
+# The Welcome app's search plugin calls its results "Bazzite Portal Actions". The name is
+# compiled into the plugin, so swap it for a text of exactly the same length (22 letters).
+YR=/usr/lib64/qt6/plugins/kf6/krunner/krunner-yafti.so
+if [ -f "$YR" ]; then
+    perl -pi -e 's/Bazzite Portal Actions/KantanOS Welcome Items/g' "$YR"
+    ! grep -q "Bazzite Portal Actions" "$YR"
+fi
+
 # Installed systems get the Windows-style local hardware clock once (the installer writes UTC).
 systemctl enable kantanos-local-clock.service
 

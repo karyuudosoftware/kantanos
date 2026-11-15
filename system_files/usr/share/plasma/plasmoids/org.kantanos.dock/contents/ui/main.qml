@@ -287,6 +287,7 @@ PlasmoidItem {
     // ---- right-click menu ----------------------------------------------------------------
     property int menuRow: -1
     property string menuLauncher: ""
+    property var menuPids: []
 
     function openMenu(visual, row, m) {
         menuRow = row
@@ -297,6 +298,8 @@ PlasmoidItem {
         pinItem.visible = menuLauncher !== "" && !pinned
         unpinItem.visible = pinned
         closeItem.visible = !m.IsLauncher && !m.IsStartup
+        menuPids = m.AppPid ? [m.AppPid] : []
+        forceQuitItem.visible = !m.IsLauncher && !m.IsStartup && menuPids.length > 0
         contextMenu.visualParent = visual
         contextMenu.openRelative()
     }
@@ -323,6 +326,12 @@ PlasmoidItem {
             text: i18n("Remove from Dock")
             icon: "window-unpin"
             onClicked: tasksModel.requestRemoveLauncher(root.menuLauncher)
+        }
+        PlasmaExtras.MenuItem {
+            id: forceQuitItem
+            text: i18n("Force Quit")
+            icon: "process-stop"
+            onClicked: root.menuPids.forEach(pid => run.exec("kill -KILL " + Number(pid)))
         }
         PlasmaExtras.MenuItem {
             id: closeItem

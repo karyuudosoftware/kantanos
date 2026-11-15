@@ -67,6 +67,10 @@ check "KantanOS Dock widget installed"      "test -s /usr/share/plasma/plasmoids
 check "new layout uses the KantanOS Dock"   "grep -q org.kantanos.dock /usr/share/plasma/look-and-feel/org.kantanos.desktop/contents/layouts/org.kde.plasma.desktop-layout.js"
 check "existing accounts get the new dock"  "test -s /usr/share/plasma/shells/org.kde.plasma.desktop/contents/updates/kantanos-dock-1.js"
 check "dock panel is see-through, no blur"  "grep -q south-center /usr/share/plasma/desktoptheme/KantanGlass/translucent/widgets/panel-background.svg && grep -q south-hint-top-margin /usr/share/plasma/desktoptheme/KantanGlass/translucent/widgets/panel-background.svg"
+check "genie minimize, smooth maximize/open" "grep -q magiclampEnabled=true /etc/xdg/kwinrc && grep -q squashEnabled=false /etc/xdg/kwinrc"
+check "Spotlight-style search on Win+Space"  "grep -q FreeFloating=true /etc/xdg/krunnerrc && grep -q Meta+Space /usr/share/kglobalaccel/org.kde.krunner.desktop"
+check "Force Quit app and shortcut"         "python3 -m py_compile /usr/libexec/kantanos/force-quit && grep -q Ctrl+Alt+Esc /usr/share/kglobalaccel/kantanos-force-quit.desktop"
+check "search shows KantanOS, not Bazzite"   "grep -q \"KantanOS Welcome Items\" /usr/lib64/qt6/plugins/kf6/krunner/krunner-yafti.so && ! grep -q \"Bazzite Portal Actions\" /usr/lib64/qt6/plugins/kf6/krunner/krunner-yafti.so"
 check "daily update timer enabled"    "systemctl is-enabled uupd.timer"
 check "update recipes parse"                "just --justfile /usr/share/ublue-os/justfile --list | grep -q kantan-undo-update"
 . /usr/lib/os-release
