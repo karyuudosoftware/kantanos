@@ -48,23 +48,27 @@ What is done, what is next, and the ideas waiting their turn. Updated as work la
 
 ## Windows and Android apps
 
-**Windows virtual machine (planned design).** For programs Wine cannot run (some Office
-versions, drivers, apps with copy protection):
+**Windows virtual machine** (`kantan-windows vm`, Welcome → Windows → Windows virtual
+machine). For programs Wine cannot run (some Office versions, apps with copy protection):
 
-1. A one-click "Set up Windows" step: turns on the virtual-machine service the base already
-   has, and asks you to download the official Windows 11 ISO from Microsoft yourself (your
-   own licence; KantanOS never ships or fetches Windows for you).
-2. An unattended install with a slimmed-down setup (no ads, no extra apps), sized for the PC
-   it runs on, with a shared folder to your home folder.
-3. Programs inside it appear as normal windows on the KantanOS desktop, with their own app
-   menu shortcuts (RDP "RemoteApp", the method WinApps uses; the RDP client is already in
-   the image). The VM starts on first use and pauses when idle.
+1. Guided setup: checks the PC (virtualisation on, 8 GB memory, 45 GB free), opens
+   Microsoft's download page for the Windows 11 ISO (your own download and licence; KantanOS
+   never ships or fetches Windows), and takes an optional product key.
+2. Unattended install of Windows 11 Pro in a VM owned by your account (QEMU, Secure Boot,
+   TPM 2.0; no admin rights), sized for the PC. A first-sign-in script removes ads and
+   extras, turns on Remote Desktop for this PC only, and removes the setup password.
+3. Windows programs get their own app menu entries and open as normal windows (FreeRDP
+   RemoteApp); your home folder is `\\tsclient\home` inside Windows. The VM starts on first
+   use, pauses after 10 idle minutes and shuts Windows down cleanly on logout.
 4. Not for anti-cheat games: those detect virtual machines; they get "restart into Windows".
+
+*Tested without Windows (firmware, TPM, setup disc, commands). The first full install is
+still to be tried on the real PC.*
 
 - [x] Windows programs through Wine: double-click any .exe or .msi to install or run it;
       installed programs land in the app menu and search. One shared Windows space
       (`~/.wine`), Windows 11 mode, Japanese fonts. Welcome → Windows tab.
-- [ ] Windows programs Wine cannot run: the built-in Windows VM above.
+- [~] Windows programs Wine cannot run: the Windows VM above (built; first real install to do).
 - [x] `C:\` in the Files sidebar ("C: (Windows)").
 - [ ] Android apps through Waydroid.
 - [x] Notepad++ through Wine (one click in Welcome → Windows). Known Wine bug: its menu bar

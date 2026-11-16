@@ -22,6 +22,10 @@ dnf5 -y install \
 
 # Windows programs (kantan-windows): Wine with its .NET and web-view helpers.
 dnf5 -y install wine wine-mono mingw32-wine-gecko mingw64-wine-gecko
+# Windows virtual machine (/usr/libexec/kantanos/windows-vm): QEMU run by the user, a software
+# TPM chip, the setup window, and xorriso for the answers disc. Secure Boot firmware
+# (edk2-ovmf) and the Remote Desktop client (freerdp) are already in the base.
+dnf5 -y install qemu-system-x86-core qemu-img qemu-ui-gtk swtpm swtpm-tools xorriso
 
 # Fedora's Wine 11 keeps its Windows libraries in /usr/lib64/wine-wow64, which the SELinux
 # policy does not label yet (it only knows /usr/lib*/wine). Without the textrel label every

@@ -119,8 +119,10 @@ doc += screen("Windows", "Windows programs", "".join([
            f"kantan-windows install-notepadpp; {PAUSE}"),
     action("cdrive", "Open the C: drive", "Program Files and the other folders your Windows programs use. It is also in the Files sidebar as \"C: (Windows)\".",
            "nohup setsid kantan-windows c-drive >&/dev/null"),
-    action("winhow", "Install any Windows program", "Download its installer (.exe or .msi) and double-click it in Files. It then appears in the app menu and in search (Win+Space). Most programs work; some need the Windows virtual machine (coming later).",
+    action("winhow", "Install any Windows program", "Download its installer (.exe or .msi) and double-click it in Files. It then appears in the app menu and in search (Win+Space). Most programs work; the rest need the Windows virtual machine below.",
            "nohup setsid xdg-open \"$HOME/Downloads\" >&/dev/null"),
+    action("winvm", "Windows virtual machine", "Real Windows 11 inside KantanOS, for programs that don't work otherwise; they open as normal windows. Needs the Windows 11 ISO from Microsoft and a Windows 11 Pro licence. Once set up, this opens Windows or lets you manage it.",
+           "nohup setsid kantan-windows vm setup >&/dev/null"),
     action("winecfg", "Windows settings", "Advanced: Windows version, drives and graphics settings for your Windows programs (Wine settings).",
            "nohup setsid kantan-windows settings >&/dev/null"),
 ]))

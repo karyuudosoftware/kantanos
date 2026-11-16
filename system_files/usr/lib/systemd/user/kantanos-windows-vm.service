@@ -1,0 +1,10 @@
+[Unit]
+Description=KantanOS Windows virtual machine
+Documentation=file:///usr/libexec/kantanos/windows-vm
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/kantanos/windows-vm _run
+# The script itself asks Windows to shut down cleanly when stopped (logout, shutdown)
+KillMode=mixed
+TimeoutStopSec=150

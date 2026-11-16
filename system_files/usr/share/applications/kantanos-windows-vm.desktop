@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Windows Virtual Machine
+GenericName=Run Windows programs
+Comment=Set up Windows 11 for programs that need it, or open and manage it
+Exec=kantan-windows vm setup
+Icon=computer
+Categories=System;
+Keywords=windows;vm;virtual machine;office;

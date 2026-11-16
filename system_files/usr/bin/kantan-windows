@@ -8,6 +8,8 @@
 #   kantan-windows c-drive                            open C: in Files
 #   kantan-windows settings                           Wine settings (Windows version, drives)
 #   kantan-windows install-notepadpp                  download and install Notepad++
+#   kantan-windows vm [setup|desktop|app|scan|stop]   the Windows virtual machine, for programs
+#                                                     Wine cannot run (/usr/libexec/kantanos/windows-vm)
 set -u
 export WINEPREFIX="${KANTAN_WINEPREFIX:-$HOME/.wine}"
 export WINEDEBUG="${WINEDEBUG:--all}"
@@ -103,8 +105,12 @@ case "${1:-}" in
             exit 1
         fi
         ;;
+    vm)
+        shift
+        exec /usr/libexec/kantanos/windows-vm "$@"
+        ;;
     *)
-        echo "usage: kantan-windows run <file> | setup | c-drive | settings | install-notepadpp"
+        echo "usage: kantan-windows run <file> | setup | c-drive | settings | install-notepadpp | vm"
         exit 2
         ;;
 esac

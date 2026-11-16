@@ -1,0 +1,741 @@
+#!/usr/bin/python3
+"""KantanOS Windows virtual machine.
+
+For Windows programs that Wine cannot run. Windows 11 runs in a QEMU virtual machine owned
+by the user (no admin rights, no libvirt): Secure Boot firmware, a software TPM 2.0 chip, a
+private network whose only way in is Remote Desktop on 127.0.0.1. Windows programs open
+through FreeRDP's RemoteApp mode as ordinary windows on the KantanOS desktop, with the home
+folder shared as \\\\tsclient\\home. The VM pauses after ten idle minutes and shuts Windows
+down cleanly when the user logs out.
+
+The user brings their own Windows 11 ISO from Microsoft and their own licence; KantanOS never
+downloads or ships Windows. Not for anti-cheat games (those need a real Windows install).
+
+  windows-vm setup           guided setup, or a menu of actions once Windows is installed
+  windows-vm desktop         the whole Windows desktop in a window
+  windows-vm app <id>        one Windows program (ids come from the app list)
+  windows-vm scan            refresh the Windows programs in the KantanOS app menu
+  windows-vm start | stop | status | password | remove
+"""
+import json
+import os
+import re
+import secrets
+import shutil
+import signal
+import socket
+import string
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+HOME = os.path.expanduser("~")
+XDG_DATA = os.environ.get("XDG_DATA_HOME", os.path.join(HOME, ".local", "share"))
+XDG_CONFIG = os.environ.get("XDG_CONFIG_HOME", os.path.join(HOME, ".config"))
+DATA = os.environ.get("KANTAN_WINVM_DIR", os.path.join(XDG_DATA, "kantanos", "windows-vm"))
+CONF = os.path.join(XDG_CONFIG, "kantanos", "windows-vm.json")
+APPS = os.path.join(XDG_DATA, "applications")
+SHARE = "/usr/share/kantanos/windows-vm"
+SELF = os.path.abspath(__file__)
+
+OVMF_CODE = "/usr/share/edk2/ovmf/OVMF_CODE_4M.secboot.qcow2"
+OVMF_VARS = "/usr/share/edk2/ovmf/OVMF_VARS_4M.secboot.qcow2"   # Microsoft keys enrolled
+UNIT = "kantanos-windows-vm.service"
+SETUP_UNIT = "kantanos-windows-setup"
+MS_DOWNLOAD = "https://www.microsoft.com/software-download/windows11"
+# Microsoft's published install key for Windows 11 Pro. It only chooses the edition (Pro is
+# needed for Remote Desktop); Windows stays unactivated until the user enters their own key.
+GENERIC_PRO_KEY = "VK7JG-NPHTM-C97JM-9MPGT-3V66T"
+DISK_SIZE = "128G"           # grows as used; a fresh install takes about 25 GB
+IDLE_PAUSE = 600             # seconds without a Windows window before the VM is paused
+TITLE = "Windows virtual machine"
+
+# Linux time zones → Windows time zone names (the common ones; others fall back to UTC and
+# Windows' own automatic time zone).
+WINDOWS_TZ = {
+    "America/Toronto": "Eastern Standard Time", "America/New_York": "Eastern Standard Time",
+    "America/Montreal": "Eastern Standard Time", "America/Detroit": "Eastern Standard Time",
+    "America/Chicago": "Central Standard Time", "America/Winnipeg": "Central Standard Time",
+    "America/Regina": "Canada Central Standard Time", "America/Denver": "Mountain Standard Time",
+    "America/Edmonton": "Mountain Standard Time", "America/Phoenix": "US Mountain Standard Time",
+    "America/Los_Angeles": "Pacific Standard Time", "America/Vancouver": "Pacific Standard Time",
+    "America/Halifax": "Atlantic Standard Time", "America/St_Johns": "Newfoundland Standard Time",
+    "America/Anchorage": "Alaskan Standard Time", "Pacific/Honolulu": "Hawaiian Standard Time",
+    "Europe/London": "GMT Standard Time", "Europe/Dublin": "GMT Standard Time",
+    "Europe/Paris": "Romance Standard Time", "Europe/Brussels": "Romance Standard Time",
+    "Europe/Madrid": "Romance Standard Time", "Europe/Berlin": "W. Europe Standard Time",
+    "Europe/Amsterdam": "W. Europe Standard Time", "Europe/Rome": "W. Europe Standard Time",
+    "Europe/Zurich": "W. Europe Standard Time", "Europe/Stockholm": "W. Europe Standard Time",
+    "Asia/Tokyo": "Tokyo Standard Time", "Asia/Seoul": "Korea Standard Time",
+    "Asia/Shanghai": "China Standard Time", "Asia/Hong_Kong": "China Standard Time",
+    "Australia/Sydney": "AUS Eastern Standard Time", "Australia/Melbourne": "AUS Eastern Standard Time",
+    "Pacific/Auckland": "New Zealand Standard Time", "UTC": "UTC", "Etc/UTC": "UTC",
+}
+
+
+# --- small helpers -------------------------------------------------------------------------
+
+def notify(summary, body=""):
+    print(summary + (": " + body if body else ""), flush=True)
+    if shutil.which("notify-send"):
+        subprocess.run(["notify-send", "-a", TITLE, "-i", "computer", summary, body],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def kdialog(*args):
+    """Runs a kdialog box; returns (ok, text)."""
+    r = subprocess.run(["kdialog", "--title", TITLE, *args], capture_output=True, text=True)
+    return r.returncode == 0, r.stdout.strip()
+
+
+def info(text):
+    kdialog("--msgbox", text)
+
+
+def error(text):
+    kdialog("--error", text)
+    print(text, file=sys.stderr)
+
+
+def load():
+    try:
+        with open(CONF, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save(cfg):
+    """The config holds the Windows password: readable by this user only."""
+    os.makedirs(os.path.dirname(CONF), exist_ok=True)
+    fd = os.open(CONF + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=1)
+    os.replace(CONF + ".tmp", CONF)
+
+
+def unit_active(unit=UNIT):
+    return subprocess.run(["systemctl", "--user", "is-active", "--quiet", unit]).returncode == 0
+
+
+def free_port(start=33890):
+    for port in range(start, start + 100):
+        with socket.socket() as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    raise SystemExit("no free local port for Remote Desktop")
+
+
+def qmp(command, arguments=None, timeout=10):
+    """One QEMU monitor command over the VM's QMP socket."""
+    with socket.socket(socket.AF_UNIX) as s:
+        s.settimeout(timeout)
+        s.connect(os.path.join(DATA, "qmp.sock"))
+        f = s.makefile("rw", encoding="utf-8")
+        f.readline()                                  # greeting
+
+        def call(cmd, args=None):
+            msg = {"execute": cmd}
+            if args:
+                msg["arguments"] = args
+            f.write(json.dumps(msg) + "\n")
+            f.flush()
+            while True:
+                line = f.readline()
+                if not line:
+                    raise ConnectionError("QEMU closed the monitor")
+                reply = json.loads(line)
+                if "return" in reply:
+                    return reply["return"]
+                if "error" in reply:
+                    raise RuntimeError(reply["error"].get("desc", "QEMU error"))
+        call("qmp_capabilities")
+        return call(command, arguments)
+
+
+def vm_status():
+    try:
+        return qmp("query-status").get("status", "unknown")
+    except (OSError, RuntimeError, ValueError):
+        return "off"
+
+
+# --- the virtual machine -------------------------------------------------------------------
+
+def qemu_args(cfg, mode):
+    """mode: "install" (setup window, Windows ISO + answers disc), "run" (no window), or
+    "test" (firmware and TPM only, no disks)."""
+    kvm = os.access("/dev/kvm", os.R_OK | os.W_OK)
+    cpu = ("host,hv_relaxed,hv_vapic,hv_spinlocks=0x1fff,hv_time,hv_vpindex,hv_synic,hv_stimer,"
+           "hv_frequencies,hv_reset,hv_runtime,hv_tlbflush,hv_ipi") if kvm else "max"
+    a = ["qemu-system-x86_64", "-name", "Windows,process=kantanos-windows",
+         "-machine", "q35,smm=on,hpet=off,accel=" + ("kvm" if kvm else "tcg"),
+         "-global", "driver=cfi.pflash01,property=secure,value=on",
+         "-global", "ICH9-LPC.disable_s3=1",
+         "-cpu", cpu, "-smp", str(cfg["cpus"]), "-m", str(cfg["ram_mb"]),
+         "-rtc", "base=localtime,clock=host,driftfix=slew",
+         "-drive", f"if=pflash,format=qcow2,unit=0,readonly=on,file={OVMF_CODE}",
+         "-drive", f"if=pflash,format=qcow2,unit=1,file={DATA}/vars.qcow2",
+         "-chardev", f"socket,id=chrtpm,path={DATA}/tpm.sock",
+         "-tpmdev", "emulator,id=tpm0,chardev=chrtpm", "-device", "tpm-crb,tpmdev=tpm0",
+         "-netdev", f"user,id=n0,hostfwd=tcp:127.0.0.1:{cfg['port']}-:3389",
+         "-device", "e1000e,netdev=n0",
+         "-device", "qemu-xhci", "-device", "usb-tablet", "-vga", "std",
+         "-qmp", f"unix:{DATA}/qmp.sock,server=on,wait=off", "-monitor", "none",
+         "-device", "ahci,id=ahci"]
+    if mode != "test":
+        a += ["-drive", f"file={DATA}/disk.qcow2,if=none,id=disk0,format=qcow2,discard=unmap,aio=threads",
+              "-device", "ide-hd,drive=disk0,bus=ahci.0,bootindex=1"]
+    if mode == "install":
+        a += ["-drive", f"file={cfg['iso']},media=cdrom,if=none,id=cd0,readonly=on",
+              "-device", "ide-cd,drive=cd0,bus=ahci.1,bootindex=2",
+              "-drive", f"file={DATA}/setup.iso,media=cdrom,if=none,id=cd1,readonly=on",
+              "-device", "ide-cd,drive=cd1,bus=ahci.2",
+              "-display", "gtk,zoom-to-fit=on,show-menubar=off"]
+    else:
+        a += ["-display", "none"]
+    return a
+
+
+def start_tpm():
+    os.makedirs(os.path.join(DATA, "tpm"), exist_ok=True)
+    sock = os.path.join(DATA, "tpm.sock")
+    if os.path.exists(sock):
+        os.unlink(sock)
+    tpm = subprocess.Popen(["swtpm", "socket", "--tpm2", "--tpmstate", f"dir={DATA}/tpm",
+                            "--ctrl", f"type=unixio,path={sock}", "--terminate"],
+                           stderr=subprocess.DEVNULL)    # harmless SHA-1 profile warnings
+    for _ in range(50):
+        if os.path.exists(sock):
+            return tpm
+        time.sleep(0.2)
+    tpm.kill()
+    raise SystemExit("the TPM chip (swtpm) did not start")
+
+
+def rdp_connections(port):
+    r = subprocess.run(["ss", "-Htn", "state", "established", f"( sport = :{port} )"],
+                       capture_output=True, text=True)
+    return len([l for l in r.stdout.splitlines() if l.strip()])
+
+
+def shut_down_guest(q):
+    """Asks Windows to shut down (like pressing the power button) and waits for it."""
+    for attempt in range(3):
+        try:
+            if vm_status() == "paused":
+                qmp("cont")
+            qmp("system_powerdown")
+        except (OSError, RuntimeError, ValueError):
+            pass
+        try:
+            q.wait(timeout=40)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+    q.terminate()
+
+
+def run_vm(mode):
+    """Body of the VM service (and of the setup unit). Runs QEMU in the foreground."""
+    cfg = load()
+    if mode == "test":
+        cfg = {"cpus": 1, "ram_mb": 512, "port": free_port(43890)}
+    tpm = start_tpm()
+    q = subprocess.Popen(qemu_args(cfg, mode))
+    stop = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+
+    if mode == "install":
+        # "Press any key to boot from CD or DVD": press it for the user while it can show.
+        def press_keys():
+            for _ in range(60):
+                if q.poll() is not None or stop.is_set():
+                    return
+                time.sleep(1)
+                try:
+                    qmp("send-key", {"keys": [{"type": "qcode", "data": "ret"}]})
+                except (OSError, RuntimeError, ValueError):
+                    pass
+        threading.Thread(target=press_keys, daemon=True).start()
+
+    idle_since = None
+    while q.poll() is None and not stop.wait(15):
+        if mode != "run":
+            continue
+        if rdp_connections(cfg["port"]):
+            idle_since = None
+        elif vm_status() == "running":
+            idle_since = idle_since or time.time()
+            if time.time() - idle_since > IDLE_PAUSE:
+                try:
+                    qmp("stop")                       # paused: no CPU use, instant resume
+                except (OSError, RuntimeError, ValueError):
+                    pass
+    if q.poll() is None:
+        shut_down_guest(q)
+    tpm.terminate()
+    return q.returncode or 0
+
+
+def freerdp(cfg, extra, timeout=None):
+    """Runs xfreerdp with the settings on stdin, so the password is not on a command line.
+    /cert:ignore is fine here: the only thing at 127.0.0.1:<port> is this user's own VM."""
+    args = [f"/v:127.0.0.1:{cfg['port']}", f"/u:{cfg['user']}", f"/p:{cfg['password']}",
+            "/cert:ignore", "/log-level:ERROR"] + extra
+    p = subprocess.Popen(["xfreerdp", "/args-from:stdin"], stdin=subprocess.PIPE, text=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    p.stdin.write("\n".join(args) + "\n")
+    p.stdin.close()
+    try:
+        return p.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        return -1
+
+
+def windows_ready(cfg):
+    return freerdp(cfg, ["+auth-only"], timeout=30) == 0
+
+
+def wait_ready(cfg, seconds):
+    end = time.time() + seconds
+    while time.time() < end:
+        if windows_ready(cfg):
+            return True
+        time.sleep(5)
+    return False
+
+
+def ensure_running(cfg):
+    if not unit_active():
+        notify("Starting Windows…", "This takes about a minute the first time.")
+        subprocess.run(["systemctl", "--user", "start", UNIT])
+    elif vm_status() == "paused":
+        qmp("cont")
+    if not wait_ready(cfg, 300):
+        notify("Windows did not answer", "Try again, or use “Shut down Windows” in KantanOS Welcome → Windows first.")
+        sys.exit(1)
+
+
+SHARED_HOME = [f"/drive:home,{HOME}", "+clipboard", "/sound", "+auto-reconnect"]
+
+
+def open_app(app_id):
+    cfg = need_installed()
+    apps = read_apps()
+    if app_id not in apps:
+        error("That Windows program is no longer in the list. Refresh the Windows apps in KantanOS Welcome → Windows.")
+        sys.exit(1)
+    name, path = apps[app_id]
+    name = name.replace(",", " ")          # FreeRDP's /app option separates fields with commas
+    ensure_running(cfg)
+    freerdp(cfg, SHARED_HOME + [f"/app:program:{path},name:{name}", "/wm-class:kantanos-windows"])
+
+
+def open_desktop():
+    cfg = need_installed()
+    ensure_running(cfg)
+    freerdp(cfg, SHARED_HOME + ["/dynamic-resolution", "/size:1600x900", "/title:Windows",
+                                "/wm-class:kantanos-windows"])
+    scan(quiet=True)          # programs installed in the desktop show up in the app menu
+
+
+# --- Windows programs in the KantanOS app menu -----------------------------------------
+
+def read_apps():
+    apps = {}
+    try:
+        with open(os.path.join(DATA, "scan", "apps.tsv"), encoding="utf-8-sig") as f:
+            for line in f:
+                parts = line.rstrip("\r\n").split("\t")
+                if len(parts) == 3 and re.fullmatch(r"[0-9a-f]{12}", parts[0]):
+                    apps[parts[0]] = (parts[1], parts[2])
+    except OSError:
+        pass
+    return apps
+
+
+def desktop_entry(path, name, comment, exec_line, icon):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("[Desktop Entry]\nType=Application\n"
+                f"Name={name}\nComment={comment}\nExec={exec_line}\nIcon={icon}\n"
+                "Categories=Utility;\nKeywords=windows;\nX-KantanOS-WindowsVM=true\n")
+
+
+def write_entries():
+    os.makedirs(APPS, exist_ok=True)
+    for f in os.listdir(APPS):
+        if f.startswith("kantanos-winvm-") and f.endswith(".desktop"):
+            os.unlink(os.path.join(APPS, f))
+    desktop_entry(os.path.join(APPS, "kantanos-winvm-desktop.desktop"), "Windows",
+                  "The whole Windows desktop in a window", "kantan-windows vm desktop", "computer")
+    for app_id, (name, _path) in read_apps().items():
+        clean = re.sub(r"[\r\n]", " ", name).strip() or "Windows program"
+        icon = os.path.join(DATA, "scan", "icons", app_id + ".png")
+        desktop_entry(os.path.join(APPS, f"kantanos-winvm-{app_id}.desktop"), clean,
+                      "Windows program", f"kantan-windows vm app {app_id}",
+                      icon if os.path.exists(icon) else "wine")
+
+
+def scan(quiet=False):
+    cfg = need_installed()
+    ensure_running(cfg)
+    out = os.path.join(DATA, "scan")
+    shutil.rmtree(out, ignore_errors=True)
+    os.makedirs(out)
+    ps = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+    freerdp(cfg, [f"/drive:kscan,{out}",
+                  f"/app:program:{ps},cmd:-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\\kantanos\\scan.ps1"],
+            timeout=180)
+    write_entries()
+    if not quiet:
+        n = len(read_apps())
+        notify("Windows apps updated", f"{n} Windows program{'s' if n != 1 else ''} in the app menu and search.")
+
+
+# --- setup ---------------------------------------------------------------------------------
+
+def need_installed():
+    cfg = load()
+    if not cfg.get("installed"):
+        error("Windows is not set up yet. Open KantanOS Welcome → Windows → Windows virtual machine.")
+        sys.exit(1)
+    return cfg
+
+
+def iso_language(iso):
+    """Checks the ISO is a Windows installer and returns its language, e.g. "en-US"."""
+    listing = subprocess.run(["xorriso", "-indev", iso, "-ls", "/sources/*"],
+                             capture_output=True, text=True).stdout
+    if "install.wim" not in listing.lower() and "install.esd" not in listing.lower():
+        return None
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run(["xorriso", "-osirrox", "on", "-indev", iso, "-extract",
+                        "/sources/lang.ini", os.path.join(tmp, "lang.ini")],
+                       capture_output=True)
+        try:
+            text = open(os.path.join(tmp, "lang.ini"), encoding="utf-8-sig", errors="replace").read()
+        except OSError:
+            return "en-US"
+    m = re.search(r"\[Available UI Languages\]\s*\n\s*([a-zA-Z]{2,3}-[a-zA-Z]{2,4})", text)
+    if not m:
+        return "en-US"
+    lang, region = m.group(1).split("-", 1)
+    return f"{lang.lower()}-{region.upper()}"
+
+
+def host_timezone():
+    try:
+        tz = os.path.realpath("/etc/localtime").split("/zoneinfo/", 1)[1]
+    except (IndexError, OSError):
+        tz = "UTC"
+    return WINDOWS_TZ.get(tz, "UTC")
+
+
+def windows_user():
+    user = os.environ.get("USER", "")
+    reserved = {"administrator", "guest", "defaultaccount", "wdagutilityaccount", "system", "root"}
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,19}", user) and user.lower() not in reserved:
+        return user
+    return "kantan"
+
+
+def make_password():
+    alphabet = string.ascii_letters + string.digits
+    while True:
+        pw = "".join(secrets.choice(alphabet) for _ in range(20))
+        if any(c.islower() for c in pw) and any(c.isupper() for c in pw) and any(c.isdigit() for c in pw):
+            return pw
+
+
+def build_setup_disc(cfg):
+    """The answers disc: autounattend.xml plus the KantanOS scripts Windows runs."""
+    lang = cfg["lang"]
+    user_locale = os.environ.get("LANG", "").split(".")[0].replace("_", "-") or lang
+    if not re.fullmatch(r"[a-z]{2,3}-[A-Z]{2}", user_locale):
+        user_locale = lang
+    inputs = "ja-JP;en-US" if lang.startswith("ja") else f"{lang};ja-JP"
+    values = {"@LANG@": lang, "@USERLOCALE@": user_locale, "@INPUT@": inputs,
+              "@TZ@": cfg["timezone"], "@USER@": cfg["user"], "@PASSWORD@": cfg["password"],
+              "@KEY@": cfg.get("key") or GENERIC_PRO_KEY}
+    with open(os.path.join(SHARE, "autounattend.xml"), encoding="utf-8") as f:
+        xml = f.read()
+    for k, v in values.items():
+        xml = xml.replace(k, v)
+    with tempfile.TemporaryDirectory() as tmp:
+        os.makedirs(os.path.join(tmp, "kantanos"))
+        fd = os.open(os.path.join(tmp, "autounattend.xml"), os.O_WRONLY | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(xml)
+        for script in ("firstlogon.ps1", "scan.ps1"):
+            shutil.copy(os.path.join(SHARE, script), os.path.join(tmp, "kantanos", script))
+        iso = os.path.join(DATA, "setup.iso")
+        subprocess.run(["xorriso", "-as", "mkisofs", "-quiet", "-J", "-R", "-V", "KANTANSETUP",
+                        "-o", iso, tmp], check=True, stderr=subprocess.DEVNULL)
+        os.chmod(iso, 0o600)
+
+
+def prepare_disk():
+    os.makedirs(DATA, exist_ok=True)
+    os.chmod(DATA, 0o700)
+    # Btrfs: no copy-on-write for the disk image (much faster, no fragmentation)
+    subprocess.run(["chattr", "+C", DATA], capture_output=True)
+    for f in ("disk.qcow2", "vars.qcow2"):
+        try:
+            os.unlink(os.path.join(DATA, f))
+        except FileNotFoundError:
+            pass
+    shutil.rmtree(os.path.join(DATA, "tpm"), ignore_errors=True)
+    subprocess.run(["qemu-img", "create", "-q", "-f", "qcow2", os.path.join(DATA, "disk.qcow2"),
+                    DISK_SIZE], check=True)
+    shutil.copy(OVMF_VARS, os.path.join(DATA, "vars.qcow2"))
+    os.chmod(os.path.join(DATA, "vars.qcow2"), 0o600)
+
+
+def find_downloaded_iso():
+    downloads = os.path.join(HOME, "Downloads")
+    try:
+        isos = [os.path.join(downloads, f) for f in os.listdir(downloads)
+                if f.lower().endswith(".iso") and "win" in f.lower()]
+    except OSError:
+        return None
+    return max(isos, key=os.path.getmtime) if isos else None
+
+
+def setup():
+    cfg = load()
+    if cfg.get("installed"):
+        return manage(cfg)
+    if unit_active(SETUP_UNIT + ".service"):
+        info("Windows is installing right now. Its setup window shows how far it has got.")
+        return
+
+    # Can this PC run it?
+    if not os.access("/dev/kvm", os.R_OK | os.W_OK):
+        error("Virtualisation is turned off in this PC's firmware (BIOS/UEFI).\n\n"
+              "Restart, open the firmware settings and turn on “SVM Mode” (AMD) or "
+              "“Intel Virtualization Technology”, then try again.")
+        return
+    mem_kb = int(re.search(r"MemTotal:\s+(\d+)", open("/proc/meminfo").read()).group(1))
+    if mem_kb < 7_500_000:
+        error("Windows needs a PC with at least 8 GB of memory.")
+        return
+    os.makedirs(os.path.dirname(DATA), exist_ok=True)
+    if shutil.disk_usage(os.path.dirname(DATA)).free < 45 * 1024**3:
+        error("Windows needs at least 45 GB of free space in your home folder.")
+        return
+
+    ok, _ = kdialog("--yes-label", "Continue", "--no-label", "Cancel", "--yesno",
+        "This puts Windows 11 inside KantanOS, for Windows programs that don't work otherwise. "
+        "They then open as normal windows and appear in the app menu.\n\n"
+        "• You need the Windows 11 disc image (ISO) from Microsoft's website.\n"
+        "• Windows 11 Pro is installed. Enter your product key now or later in Windows "
+        "(Settings → System → Activation). Until then Windows works but shows an "
+        "“Activate Windows” reminder.\n"
+        "• Installing takes 20–40 minutes and needs no help. Windows uses about 25 GB to start with.\n"
+        "• Not for games with anti-cheat: those need a real Windows.")
+    if not ok:
+        return
+
+    if os.path.exists(os.path.join(DATA, "disk.qcow2")):
+        ok, _ = kdialog("--yes-label", "Start again", "--no-label", "Cancel", "--warningyesno",
+                        "Windows setup did not finish last time. Start the install again from the beginning?")
+        if not ok:
+            return
+
+    iso = cfg.get("iso") if cfg.get("iso") and os.path.exists(cfg["iso"]) else find_downloaded_iso()
+    if not iso:
+        ok, _ = kdialog("--yes-label", "Open the download page", "--no-label", "I already have it",
+                        "--yesno", "Download “Windows 11 Disk Image (ISO) for x64 devices” from Microsoft. "
+                        "Choose your language there, and the download goes into your Downloads folder.\n\n"
+                        "Come back here when the download has finished.")
+        if ok:
+            subprocess.Popen(["xdg-open", MS_DOWNLOAD])
+            info("When the Windows ISO has finished downloading, press OK and choose it.")
+    ok, iso = kdialog("--getopenfilename", iso or os.path.join(HOME, "Downloads"),
+                      "*.iso *.ISO|Windows disc image (*.iso)")
+    if not ok or not iso:
+        return
+    lang = iso_language(iso)
+    if not lang:
+        error("That file is not a Windows install disc. Download the Windows 11 ISO from Microsoft's website.")
+        return
+
+    ok, key = kdialog("--inputbox", "Your Windows 11 product key (optional).\n\n"
+                      "Leave it empty to enter it later in Windows. Remote Desktop, which KantanOS "
+                      "uses to show Windows programs, needs Windows 11 Pro.", "")
+    if not ok:
+        return
+    key = key.strip().upper()
+    if key and not re.fullmatch(r"[A-Z0-9]{5}(-[A-Z0-9]{5}){4}", key):
+        error("That product key doesn't look right (it is 25 letters and numbers in five groups). "
+              "Leave it empty to enter it later in Windows.")
+        return
+
+    cpus = max(2, min(8, (os.cpu_count() or 4) // 2))
+    ram_mb = max(4096, min(16384, (mem_kb // 1024) // 4 // 1024 * 1024))
+    cfg = {"iso": iso, "lang": lang, "key": key, "user": windows_user(),
+           "password": cfg.get("password") or make_password(), "timezone": host_timezone(),
+           "port": cfg.get("port") or free_port(), "cpus": cpus, "ram_mb": ram_mb, "installed": False}
+    save(cfg)
+    prepare_disk()
+    build_setup_disc(cfg)
+
+    env = [f"--setenv={v}={os.environ[v]}" for v in ("DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR",
+                                                    "DBUS_SESSION_BUS_ADDRESS") if os.environ.get(v)]
+    subprocess.run(["systemctl", "--user", "reset-failed", SETUP_UNIT + ".service"], capture_output=True)
+    subprocess.run(["systemd-run", "--user", "--collect", "--quiet", "--unit", SETUP_UNIT, *env,
+                    SELF, "_install"], check=True)
+
+
+def install():
+    """Body of the setup unit: the install window, then first start and the app list."""
+    cfg = load()
+    notify("Windows is installing",
+           "This takes 20–40 minutes and Windows restarts a few times. You don't need to do anything; "
+           "please leave the Windows setup window open.")
+    run_vm("install")
+    try:
+        os.unlink(os.path.join(DATA, "setup.iso"))      # it holds the first password
+    except FileNotFoundError:
+        pass
+    subprocess.run(["systemctl", "--user", "start", UNIT])
+    if not wait_ready(cfg, 600):
+        notify("Windows setup did not finish",
+               "Open KantanOS Welcome → Windows → Windows virtual machine to try again.")
+        subprocess.run(["systemctl", "--user", "stop", UNIT])
+        return 1
+    cfg["installed"] = True
+    cfg.pop("iso", None)
+    save(cfg)
+    scan(quiet=True)
+    notify("Windows is ready",
+           "“Windows” is in the app menu. Install programs there, and they appear in the app menu and search too.")
+    return 0
+
+
+def manage(cfg):
+    running = unit_active()
+    items = ["desktop", "Open the Windows desktop", "scan", "Update the list of Windows programs"]
+    if running:
+        items += ["stop", "Shut down Windows"]
+    items += ["password", "Show the Windows sign-in password", "remove", "Remove Windows…"]
+    ok, choice = kdialog("--menu", "Windows is set up. What would you like to do?", *items)
+    if not ok:
+        return
+    if choice == "desktop":
+        open_desktop()
+    elif choice == "scan":
+        scan()
+    elif choice == "stop":
+        stop()
+    elif choice == "password":
+        info(f"Windows user: {cfg['user']}\nPassword: {cfg['password']}\n\n"
+             "KantanOS signs in for you; you only need this inside Windows (for example when it "
+             "asks to confirm a change).")
+    elif choice == "remove":
+        remove()
+
+
+def stop():
+    if unit_active():
+        notify("Shutting down Windows…")
+        subprocess.run(["systemctl", "--user", "stop", UNIT])
+
+
+def remove():
+    ok, _ = kdialog("--yes-label", "Delete Windows", "--no-label", "Keep it", "--warningyesno",
+                    "This deletes Windows and everything saved inside it, including its programs. "
+                    "Files in your home folder are not affected.\n\nThis cannot be undone.")
+    if not ok:
+        return
+    subprocess.run(["systemctl", "--user", "stop", UNIT, SETUP_UNIT + ".service"], capture_output=True)
+    shutil.rmtree(DATA, ignore_errors=True)
+    try:
+        os.unlink(CONF)
+    except FileNotFoundError:
+        pass
+    if os.path.isdir(APPS):
+        for f in os.listdir(APPS):
+            if f.startswith("kantanos-winvm-"):
+                os.unlink(os.path.join(APPS, f))
+    notify("Windows was removed")
+
+
+def selftest():
+    """Boots the VM firmware with its TPM for a few seconds (no Windows needed), and builds a
+    sample answers disc. Used by the image checks and when testing KantanOS."""
+    global DATA
+    keep = DATA
+    with tempfile.TemporaryDirectory() as tmp:
+        DATA = tmp
+        shutil.copy(OVMF_VARS, os.path.join(tmp, "vars.qcow2"))
+        os.chmod(os.path.join(tmp, "vars.qcow2"), 0o600)
+        result = {}
+
+        def probe():
+            time.sleep(8)
+            try:
+                result["status"] = qmp("query-status").get("status")
+                result["tpm"] = [t.get("model") for t in qmp("query-tpm")]
+                qmp("quit")
+            except Exception as e:  # noqa: BLE001 - report whatever went wrong
+                result["error"] = str(e)
+                os.kill(os.getpid(), signal.SIGTERM)
+        threading.Thread(target=probe, daemon=True).start()
+        run_vm("test")
+        build_setup_disc({"lang": "en-US", "timezone": "UTC", "user": "test", "password": make_password()})
+        listing = subprocess.run(["xorriso", "-indev", os.path.join(tmp, "setup.iso"), "-find", "/", "-type", "f"],
+                                 capture_output=True, text=True).stdout
+        DATA = keep
+    ok = (result.get("status") == "running" and result.get("tpm") == ["tpm-crb"]
+          and "autounattend.xml" in listing and "firstlogon.ps1" in listing and "scan.ps1" in listing)
+    print(f"firmware: {result.get('status')}  tpm: {result.get('tpm')}  "
+          f"answers disc: {'ok' if 'autounattend.xml' in listing else 'missing'}"
+          + (f"  error: {result['error']}" if "error" in result else ""))
+    print("SELFTEST " + ("PASS" if ok else "FAIL"))
+    return 0 if ok else 1
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else "setup"
+    if cmd == "setup":
+        setup()
+    elif cmd == "desktop":
+        open_desktop()
+    elif cmd == "app" and len(sys.argv) > 2:
+        open_app(sys.argv[2])
+    elif cmd == "scan":
+        scan()
+    elif cmd == "start":
+        ensure_running(need_installed())
+    elif cmd == "stop":
+        stop()
+    elif cmd == "status":
+        cfg = load()
+        print("installed" if cfg.get("installed") else "not set up", "|", vm_status() if unit_active() else "off")
+    elif cmd == "password":
+        cfg = need_installed()
+        print(f"user: {cfg['user']}\npassword: {cfg['password']}")
+    elif cmd == "remove":
+        remove()
+    elif cmd == "_run":
+        sys.exit(run_vm("run"))
+    elif cmd == "_install":
+        sys.exit(install())
+    elif cmd == "_selftest":
+        sys.exit(selftest())
+    else:
+        print(__doc__)
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()

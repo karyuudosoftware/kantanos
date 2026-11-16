@@ -286,9 +286,14 @@ screens:
         script: "nohup setsid kantan-windows c-drive >&/dev/null"
       - id: "winhow"
         title: "Install any Windows program"
-        description: "Download its installer (.exe or .msi) and double-click it in Files. It then appears in the app menu and in search (Win+Space). Most programs work; some need the Windows virtual machine (coming later)."
+        description: "Download its installer (.exe or .msi) and double-click it in Files. It then appears in the app menu and in search (Win+Space). Most programs work; the rest need the Windows virtual machine below."
         default: false
         script: "nohup setsid xdg-open \"$HOME/Downloads\" >&/dev/null"
+      - id: "winvm"
+        title: "Windows virtual machine"
+        description: "Real Windows 11 inside KantanOS, for programs that don't work otherwise; they open as normal windows. Needs the Windows 11 ISO from Microsoft and a Windows 11 Pro licence. Once set up, this opens Windows or lets you manage it."
+        default: false
+        script: "nohup setsid kantan-windows vm setup >&/dev/null"
       - id: "winecfg"
         title: "Windows settings"
         description: "Advanced: Windows version, drives and graphics settings for your Windows programs (Wine settings)."
