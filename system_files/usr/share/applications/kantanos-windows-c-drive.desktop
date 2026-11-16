@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=C: Drive (Windows programs)
+Name[ja]=C: ドライブ（Windows プログラム）
+Comment=Program Files and other folders of your Windows programs
+Exec=kantan-windows c-drive
+Icon=drive-harddisk
+Categories=System;
+Keywords=windows;c drive;program files;wine;exe;

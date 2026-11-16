@@ -1,0 +1,110 @@
+#!/usr/bin/bash
+# kantan-windows: runs Windows programs with Wine, all in one shared "Windows" space with
+# its own C: drive (shown in Files as "C: (Windows)"). Programs installed this way get
+# shortcuts in the app menu and in search, like any other app.
+#
+#   kantan-windows run <file.exe|file.msi> [args]   install or start a Windows program
+#   kantan-windows setup                              create the Windows space (automatic)
+#   kantan-windows c-drive                            open C: in Files
+#   kantan-windows settings                           Wine settings (Windows version, drives)
+#   kantan-windows install-notepadpp                  download and install Notepad++
+set -u
+export WINEPREFIX="${KANTAN_WINEPREFIX:-$HOME/.wine}"
+export WINEDEBUG="${WINEDEBUG:--all}"
+
+say() {
+    echo "$1"
+    command -v notify-send >/dev/null && notify-send -a "Windows programs" -i wine "Windows programs" "$1" 2>/dev/null || true
+}
+
+add_sidebar_entry() {
+    python3 - "$WINEPREFIX/drive_c" <<'PY'
+import os, sys, time, urllib.parse
+target = sys.argv[1]
+path = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "user-places.xbel")
+try:
+    text = open(path, encoding="utf-8").read()
+except OSError:
+    sys.exit(0)
+href = "file://" + urllib.parse.quote(target)
+if href in text:
+    sys.exit(0)
+entry = (f' <bookmark href="{href}">\n  <title>C: (Windows)</title>\n  <info>\n'
+         f'   <metadata owner="http://freedesktop.org">\n    <bookmark:icon name="drive-harddisk"/>\n   </metadata>\n'
+         f'   <metadata owner="http://www.kde.org">\n    <ID>{int(time.time())}/windows</ID>\n   </metadata>\n  </info>\n </bookmark>\n')
+open(path, "w", encoding="utf-8").write(text.replace("</xbel>", entry + "</xbel>"))
+PY
+}
+
+setup() {
+    if [ -f "$WINEPREFIX/system.reg" ]; then
+        add_sidebar_entry
+        return 0
+    fi
+    say "Setting up Windows programs for the first time. This takes about a minute."
+    mkdir -p "$WINEPREFIX"
+    wineboot --init >/dev/null 2>&1
+    wineserver -w
+    # Behave like Windows 11, and show Japanese text with the Japanese fonts KantanOS has
+    wine winecfg /v win11 >/dev/null 2>&1
+    for font in "MS Gothic" "MS PGothic" "MS UI Gothic" "Meiryo" "Meiryo UI" "Yu Gothic" "Yu Gothic UI" \
+                "MS Mincho" "MS PMincho"; do
+        wine reg add 'HKCU\Software\Wine\Fonts\Replacements' /v "$font" /d "Noto Sans CJK JP" /f >/dev/null 2>&1
+    done
+    wineserver -w
+    add_sidebar_entry
+    say "Windows programs are ready. Your C: drive is in Files."
+}
+
+case "${1:-}" in
+    run)
+        shift
+        file="${1:-}"
+        [ -n "$file" ] && [ -f "$file" ] || { echo "usage: kantan-windows run <file.exe|file.msi>"; exit 2; }
+        shift
+        setup
+        case "${file,,}" in
+            *.msi) exec wine msiexec /i "$file" "$@" ;;
+            *.lnk) exec wine start /unix "$file" "$@" ;;
+            *)     exec wine "$file" "$@" ;;
+        esac
+        ;;
+    setup)
+        setup
+        ;;
+    c-drive)
+        setup
+        exec xdg-open "$WINEPREFIX/drive_c"
+        ;;
+    settings)
+        setup
+        exec wine winecfg
+        ;;
+    install-notepadpp)
+        setup
+        echo "Looking up the newest Notepad++ on its official download page (GitHub)..."
+        url=$(curl -fsSL https://api.github.com/repos/notepad-plus-plus/notepad-plus-plus/releases/latest \
+              | python3 -c 'import json,sys; a=[x["browser_download_url"] for x in json.load(sys.stdin)["assets"] if x["name"].endswith(".Installer.x64.exe")]; print(a[0] if a else "")')
+        case "$url" in
+            https://github.com/notepad-plus-plus/notepad-plus-plus/releases/download/*) ;;
+            *) echo "Could not find the Notepad++ installer. Check the internet connection and try again."; exit 1 ;;
+        esac
+        tmp=$(mktemp -d)
+        echo "Downloading $(basename "$url")..."
+        curl -fL --progress-bar -o "$tmp/npp-installer.exe" "$url" || { echo "Download failed."; rm -rf "$tmp"; exit 1; }
+        echo "Installing..."
+        wine "$tmp/npp-installer.exe" /S 2>/dev/null
+        wineserver -w
+        rm -rf "$tmp"
+        if [ -f "$WINEPREFIX/drive_c/Program Files/Notepad++/notepad++.exe" ]; then
+            echo "Notepad++ is installed. Find it in the app menu or with Win+Space."
+        else
+            echo "The installer finished, but Notepad++ was not found in C:\\Program Files."
+            exit 1
+        fi
+        ;;
+    *)
+        echo "usage: kantan-windows run <file> | setup | c-drive | settings | install-notepadpp"
+        exit 2
+        ;;
+esac

@@ -10,7 +10,7 @@ KANTAN_IMAGE="${KANTAN_IMAGE:-}"
 ### 1. System files -----------------------------------------------------------
 # The sources live on a Windows drive, so do not trust their permissions.
 cp -rT --no-preserve=mode,ownership /ctx/system /
-chmod 0755 /usr/libexec/kantanos/* /usr/bin/kantan-app /usr/bin/kantan-look
+chmod 0755 /usr/libexec/kantanos/* /usr/bin/kantan-app /usr/bin/kantan-look /usr/bin/kantan-windows
 
 ### 2. Packages ---------------------------------------------------------------
 # Japanese input (fcitx5 + Mozc), Japanese locale, the Inter UI font, a media player.
@@ -19,6 +19,27 @@ dnf5 -y install \
     glibc-langpack-ja langpacks-core-ja \
     rsms-inter-fonts rsms-inter-vf-fonts \
     mpv
+
+# Windows programs (kantan-windows): Wine with its .NET and web-view helpers.
+dnf5 -y install wine wine-mono mingw32-wine-gecko mingw64-wine-gecko
+
+# Fedora's Wine 11 keeps its Windows libraries in /usr/lib64/wine-wow64, which the SELinux
+# policy does not label yet (it only knows /usr/lib*/wine). Without the textrel label every
+# 32-bit Windows program, most installers included, is refused ("failed to set protection").
+# (written as /usr/lib/...: the policy treats /usr/lib64 as the same place as /usr/lib)
+WINE_FC='/usr/lib/wine-wow64(/.*)?'
+if command -v semanage >/dev/null; then
+    semanage fcontext -a -t textrel_shlib_t "$WINE_FC" 2>/dev/null || semanage fcontext -m -t textrel_shlib_t "$WINE_FC"
+else
+    echo "$WINE_FC    system_u:object_r:textrel_shlib_t:s0" >> /etc/selinux/targeted/contexts/files/file_contexts.local
+fi
+matchpathcon /usr/lib64/wine-wow64/wine/i386-windows/ntdll.dll | grep -q textrel_shlib_t
+# Wine's own menu entries (Notepad, Wordpad, Regedit, uninstaller...) clutter search and
+# beat installed programs like Notepad++; KantanOS Welcome → Windows covers what matters.
+for f in /usr/share/applications/wine-*.desktop; do
+    [ -f "$f" ] || continue
+    grep -q '^NoDisplay=' "$f" && sed -i 's/^NoDisplay=.*/NoDisplay=true/' "$f" || sed -i '/^\[Desktop Entry\]/a NoDisplay=true' "$f"
+done
 
 ### 3. Identity ---------------------------------------------------------------
 # ID stays "bazzite" so the Universal Blue tooling keeps working; the names change.
@@ -120,6 +141,25 @@ if [ -f "$YR" ]; then
     perl -pi -e 's/Bazzite Portal Actions/KantanOS Welcome Items/g' "$YR"
     ! grep -q "Bazzite Portal Actions" "$YR"
 fi
+
+# Double-clicking a Windows program (.exe, .msi) installs or runs it through kantan-windows.
+python3 - <<'PY'
+import configparser, os
+path = "/etc/xdg/mimeapps.list"
+c = configparser.ConfigParser(interpolation=None, strict=False)
+c.optionxform = str
+if os.path.exists(path):
+    c.read(path, encoding="utf-8")
+if not c.has_section("Default Applications"):
+    c.add_section("Default Applications")
+for m in ("application/x-ms-dos-executable", "application/x-msdownload", "application/x-msi",
+          "application/x-ms-shortcut", "application/vnd.microsoft.portable-executable",
+          "application/x-msdos-program"):
+    c.set("Default Applications", m, "kantanos-windows-program.desktop")
+with open(path, "w", encoding="utf-8") as fh:
+    c.write(fh, space_around_delimiters=False)
+PY
+grep -q 'x-msi=kantanos-windows-program.desktop' /etc/xdg/mimeapps.list
 
 # Installed systems get the Windows-style local hardware clock once (the installer writes UTC).
 systemctl enable kantanos-local-clock.service

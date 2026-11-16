@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Windows Program
+Name[ja]=Windows プログラム
+Comment=Install or run a Windows program
+Exec=kantan-windows run %f
+Icon=wine
+MimeType=application/x-ms-dos-executable;application/x-msdownload;application/x-msi;application/x-ms-shortcut;application/vnd.microsoft.portable-executable;application/x-msdos-program;application/x-ms-ne-executable;
+NoDisplay=true
+Terminal=false
+StartupNotify=true

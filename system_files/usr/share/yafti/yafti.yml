@@ -271,6 +271,29 @@ screens:
           - id: "remove-app"
             label: "Remove Telegram"
             script: "kantan-app uninstall org.telegram.desktop"
+  - title: "Windows"
+    description: "Windows programs"
+    actions:
+      - id: "notepadpp"
+        title: "Notepad++"
+        description: "The Windows Notepad++ text editor, downloaded from its official page and installed in your Windows programs."
+        default: false
+        script: "kantan-windows install-notepadpp; echo; echo \"Press Enter to close...\"; read -r _"
+      - id: "cdrive"
+        title: "Open the C: drive"
+        description: "Program Files and the other folders your Windows programs use. It is also in the Files sidebar as \"C: (Windows)\"."
+        default: false
+        script: "nohup setsid kantan-windows c-drive >&/dev/null"
+      - id: "winhow"
+        title: "Install any Windows program"
+        description: "Download its installer (.exe or .msi) and double-click it in Files. It then appears in the app menu and in search (Win+Space). Most programs work; some need the Windows virtual machine (coming later)."
+        default: false
+        script: "nohup setsid xdg-open \"$HOME/Downloads\" >&/dev/null"
+      - id: "winecfg"
+        title: "Windows settings"
+        description: "Advanced: Windows version, drives and graphics settings for your Windows programs (Wine settings)."
+        default: false
+        script: "nohup setsid kantan-windows settings >&/dev/null"
   - title: "Games"
     description: "Game stores and classic consoles"
     actions:

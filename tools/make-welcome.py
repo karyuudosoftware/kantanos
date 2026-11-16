@@ -114,6 +114,16 @@ doc += screen("Creative", "Photos, drawing, video and audio", "".join(app(*a) fo
     "artcraft", "ArtCraft", "Free creative and office apps (still in development). Opens the ArtCraft website, where you can get its launcher.",
     "xdg-open https://getartcraft.com/"))
 doc += screen("Media & Chat", "Players and messaging", "".join(app(*a) for a in MEDIA + CHAT))
+doc += screen("Windows", "Windows programs", "".join([
+    action("notepadpp", "Notepad++", "The Windows Notepad++ text editor, downloaded from its official page and installed in your Windows programs.",
+           f"kantan-windows install-notepadpp; {PAUSE}"),
+    action("cdrive", "Open the C: drive", "Program Files and the other folders your Windows programs use. It is also in the Files sidebar as \"C: (Windows)\".",
+           "nohup setsid kantan-windows c-drive >&/dev/null"),
+    action("winhow", "Install any Windows program", "Download its installer (.exe or .msi) and double-click it in Files. It then appears in the app menu and in search (Win+Space). Most programs work; some need the Windows virtual machine (coming later).",
+           "nohup setsid xdg-open \"$HOME/Downloads\" >&/dev/null"),
+    action("winecfg", "Windows settings", "Advanced: Windows version, drives and graphics settings for your Windows programs (Wine settings).",
+           "nohup setsid kantan-windows settings >&/dev/null"),
+]))
 doc += screen("Games", "Game stores and classic consoles", "".join(app(*a) for a in GAMES) + "".join([
     action("lutris", "EA app, Ubisoft Connect, Battle.net", "Lutris is already installed. Search for the store in Lutris and choose Install; it then adds its games to your library. Games with anti-cheat may not run on Linux.",
            "nohup setsid lutris >&/dev/null"),

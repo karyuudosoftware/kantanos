@@ -77,6 +77,10 @@ check "root login warning in the chooser"   "grep -q createAccount /usr/libexec/
 check "Wake-on-LAN on by default"           "grep -q wake-on-lan=magic /usr/lib/NetworkManager/conf.d/60-kantanos-wake-on-lan.conf && just --justfile /usr/share/ublue-os/justfile --list | grep -q kantan-wake-info"
 check "phone link app and Welcome entry"    "test -f /usr/share/applications/org.kde.kdeconnect.app.desktop && grep -q kdeconnect-app /usr/share/yafti/yafti.yml"
 check "NAS helper present"                  "bash -n /usr/libexec/kantanos/nas-connect && just --justfile /usr/share/ublue-os/justfile --list | grep -q kantan-nas-connect && command -v mount.cifs && command -v smbclient"
+check "Windows programs: Wine installed"   "command -v wine && rpm -q wine-mono && test -x /usr/bin/kantan-windows"
+check "Wine's own menu entries hidden"     "! grep -L '^NoDisplay=true' /usr/share/applications/wine-*.desktop | grep -q ."
+check ".exe and .msi open with kantan-windows" "grep -q x-msi=kantanos-windows-program.desktop /etc/xdg/mimeapps.list && grep -q x-ms-dos-executable=kantanos-windows-program.desktop /etc/xdg/mimeapps.list"
+check "32-bit Windows programs allowed (SELinux)" "matchpathcon /usr/lib64/wine-wow64/wine/i386-windows/ntdll.dll | grep -q textrel_shlib_t"
 check "daily update timer enabled"    "systemctl is-enabled uupd.timer"
 check "update recipes parse"                "just --justfile /usr/share/ublue-os/justfile --list | grep -q kantan-undo-update"
 . /usr/lib/os-release
