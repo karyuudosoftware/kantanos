@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Movie Player (Dolby Atmos)
+GenericName=Video player for a home theatre
+Comment=Plays films and sends Dolby Atmos, Dolby and DTS sound untouched to your AV receiver
+Exec=mpv --player-operation-mode=pseudo-gui --ao=pipewire --audio-spdif=ac3,eac3,dts-hd,truehd --audio-channels=auto --fullscreen -- %U
+Icon=mpv
+Terminal=false
+Categories=AudioVideo;Video;Player;
+MimeType=video/x-matroska;video/mp4;video/x-m4v;video/quicktime;video/webm;video/mpeg;video/mp2t;video/vnd.avi;video/x-msvideo;application/x-matroska;
+Keywords=atmos;truehd;dts;bitstream;passthrough;receiver;movie;film;

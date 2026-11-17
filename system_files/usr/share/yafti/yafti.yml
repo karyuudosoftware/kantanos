@@ -271,6 +271,42 @@ screens:
           - id: "remove-app"
             label: "Remove Telegram"
             script: "kantan-app uninstall org.telegram.desktop"
+      - id: "teams_for_linux"
+        title: "Microsoft Teams"
+        description: "Teams for work or school, in its own window (the community Teams for Linux app)."
+        default: false
+        status_script: "kantan-app status com.github.IsmaelMartinez.teams_for_linux"
+        options:
+          - id: "uninstall"
+            label: "Install Microsoft Teams"
+            script: "kantan-app install com.github.IsmaelMartinez.teams_for_linux"
+          - id: "remove-app"
+            label: "Remove Microsoft Teams"
+            script: "kantan-app uninstall com.github.IsmaelMartinez.teams_for_linux"
+      - id: "discord"
+        title: "Discord"
+        description: "Voice, video and text chat for friends and gaming groups."
+        default: false
+        status_script: "kantan-app status com.discordapp.Discord"
+        options:
+          - id: "uninstall"
+            label: "Install Discord"
+            script: "kantan-app install com.discordapp.Discord"
+          - id: "remove-app"
+            label: "Remove Discord"
+            script: "kantan-app uninstall com.discordapp.Discord"
+      - id: "zapzap"
+        title: "WhatsApp (ZapZap)"
+        description: "WhatsApp in its own window, with notifications. Link it to your phone once by scanning the code with WhatsApp (Settings → Linked devices)."
+        default: false
+        status_script: "kantan-app status com.rtosta.zapzap"
+        options:
+          - id: "uninstall"
+            label: "Install WhatsApp (ZapZap)"
+            script: "kantan-app install com.rtosta.zapzap"
+          - id: "remove-app"
+            label: "Remove WhatsApp (ZapZap)"
+            script: "kantan-app uninstall com.rtosta.zapzap"
   - title: "Windows"
     description: "Windows programs"
     actions:
@@ -349,6 +385,26 @@ screens:
         description: "End an app that has stopped responding. Shortcut: Ctrl+Alt+Esc."
         default: false
         script: "nohup setsid /usr/libexec/kantanos/force-quit >&/dev/null"
+      - id: "helper"
+        title: "Something not working? Ask the KantanOS Helper"
+        description: "Looks at what went wrong, explains it in plain words and offers safe fixes, asking before each one. Its AI runs on this PC (set it up once in AI settings) or, if you choose, an online service."
+        default: false
+        script: "nohup setsid /usr/libexec/kantanos/helper >&/dev/null"
+      - id: "claudecode"
+        title: "Install Claude Code"
+        description: "Claude's coding assistant for the terminal, from Anthropic's official installer. Needs a Claude account. It goes into your home folder, so updates to KantanOS don't affect it."
+        default: false
+        script: "curl -fsSL https://claude.ai/install.sh | bash; echo; echo \"Press Enter to close...\"; read -r _"
+      - id: "virusscan"
+        title: "Scan Downloads for viruses"
+        description: "Checks your Downloads folder with ClamAV. To check anything else, right-click it in Files and choose Scan for viruses."
+        default: false
+        script: "nohup setsid /usr/libexec/kantanos/virus-scan >&/dev/null"
+      - id: "fixdock"
+        title: "Dock or screen missing?"
+        description: "Puts the dock back, and lists the screens KantanOS sees (an AV receiver on HDMI can count as a screen). To pick the main screen, run: ujust kantan-main-screen"
+        default: false
+        script: "ujust kantan-reset-dock; ujust kantan-display-info; echo; echo \"Press Enter to close...\"; read -r _"
       - id: "qdirstat"
         title: "QDirStat"
         description: "See which folders use the most space, as a sorted list (like TreeSize on Windows)."
@@ -361,6 +417,42 @@ screens:
           - id: "remove-app"
             label: "Remove QDirStat"
             script: "kantan-app uninstall com.github.shundhammer.qdirstat"
+      - id: "alpaca"
+        title: "Alpaca (AI chat on this PC)"
+        description: "Chat with an AI that runs on this PC: recipes, letters, checking documents, questions. Private and free. To share the Helper's AI, add the instance http://127.0.0.1:11434 in Alpaca's settings."
+        default: false
+        status_script: "kantan-app status com.jeffser.Alpaca"
+        options:
+          - id: "uninstall"
+            label: "Install Alpaca (AI chat on this PC)"
+            script: "kantan-app install com.jeffser.Alpaca"
+          - id: "remove-app"
+            label: "Remove Alpaca (AI chat on this PC)"
+            script: "kantan-app uninstall com.jeffser.Alpaca"
+      - id: "dejadup"
+        title: "Déjà Dup Backups"
+        description: "Automatic backups of your files to Google Drive, OneDrive, the NAS or a USB drive, and getting them back. The simplest choice."
+        default: false
+        status_script: "kantan-app status org.gnome.DejaDup"
+        options:
+          - id: "uninstall"
+            label: "Install Déjà Dup Backups"
+            script: "kantan-app install org.gnome.DejaDup"
+          - id: "remove-app"
+            label: "Remove Déjà Dup Backups"
+            script: "kantan-app uninstall org.gnome.DejaDup"
+      - id: "pikabackup"
+        title: "Pika Backup"
+        description: "Backups as often as every hour to the NAS or a USB drive, with older versions of every file to go back to."
+        default: false
+        status_script: "kantan-app status org.gnome.World.PikaBackup"
+        options:
+          - id: "uninstall"
+            label: "Install Pika Backup"
+            script: "kantan-app install org.gnome.World.PikaBackup"
+          - id: "remove-app"
+            label: "Remove Pika Backup"
+            script: "kantan-app uninstall org.gnome.World.PikaBackup"
   - title: "Display & Sound"
     description: "HDR and surround sound"
     actions:
@@ -379,3 +471,8 @@ screens:
         description: "For an AV receiver. Turn the receiver on first. Heights are added by the receiver's upmixer."
         default: false
         script: "ujust kantan-audio-71; echo; echo \"Press Enter to close...\"; read -r _"
+      - id: "atmos"
+        title: "Films with Dolby Atmos"
+        description: "Open films with \"Movie Player (Dolby Atmos)\" (right-click a film → Open With). It sends Dolby Atmos, TrueHD and DTS sound untouched to the receiver, like PotPlayer's pass-through on Windows."
+        default: false
+        script: "nohup setsid xdg-open \"$HOME/Videos\" >&/dev/null"

@@ -32,6 +32,9 @@ MEDIA = [
 CHAT = [
     ("org.signal.Signal", "Signal", "Private messaging."),
     ("org.telegram.desktop", "Telegram", "Messaging."),
+    ("com.github.IsmaelMartinez.teams_for_linux", "Microsoft Teams", "Teams for work or school, in its own window (the community Teams for Linux app)."),
+    ("com.discordapp.Discord", "Discord", "Voice, video and text chat for friends and gaming groups."),
+    ("com.rtosta.zapzap", "WhatsApp (ZapZap)", "WhatsApp in its own window, with notifications. Link it to your phone once by scanning the code with WhatsApp (Settings → Linked devices)."),
 ]
 GAMES = [
     ("com.heroicgameslauncher.hgl", "Heroic Games Launcher", "Epic Games Store, GOG and Amazon Prime Gaming. In Heroic, open a game's menu and choose \"Add to Steam\" to see it in Game Mode."),
@@ -39,6 +42,9 @@ GAMES = [
 ]
 TOOLS = [
     ("com.github.shundhammer.qdirstat", "QDirStat", "See which folders use the most space, as a sorted list (like TreeSize on Windows)."),
+    ("com.jeffser.Alpaca", "Alpaca (AI chat on this PC)", "Chat with an AI that runs on this PC: recipes, letters, checking documents, questions. Private and free. To share the Helper's AI, add the instance http://127.0.0.1:11434 in Alpaca's settings."),
+    ("org.gnome.DejaDup", "Déjà Dup Backups", "Automatic backups of your files to Google Drive, OneDrive, the NAS or a USB drive, and getting them back. The simplest choice."),
+    ("org.gnome.World.PikaBackup", "Pika Backup", "Backups as often as every hour to the NAS or a USB drive, with older versions of every file to go back to."),
 ]
 
 PAUSE = 'echo; echo "Press Enter to close..."; read -r _'
@@ -137,6 +143,14 @@ doc += screen("Tools", "Disk space and system helpers", "".join([
            "nohup setsid filelight \"$HOME\" >&/dev/null"),
     action("forcequit", "Force quit an app", "End an app that has stopped responding. Shortcut: Ctrl+Alt+Esc.",
            "nohup setsid /usr/libexec/kantanos/force-quit >&/dev/null"),
+    action("helper", "Something not working? Ask the KantanOS Helper", "Looks at what went wrong, explains it in plain words and offers safe fixes, asking before each one. Its AI runs on this PC (set it up once in AI settings) or, if you choose, an online service.",
+           "nohup setsid /usr/libexec/kantanos/helper >&/dev/null"),
+    action("claudecode", "Install Claude Code", "Claude's coding assistant for the terminal, from Anthropic's official installer. Needs a Claude account. It goes into your home folder, so updates to KantanOS don't affect it.",
+           f"curl -fsSL https://claude.ai/install.sh | bash; {PAUSE}"),
+    action("virusscan", "Scan Downloads for viruses", "Checks your Downloads folder with ClamAV. To check anything else, right-click it in Files and choose Scan for viruses.",
+           "nohup setsid /usr/libexec/kantanos/virus-scan >&/dev/null"),
+    action("fixdock", "Dock or screen missing?", "Puts the dock back, and lists the screens KantanOS sees (an AV receiver on HDMI can count as a screen). To pick the main screen, run: ujust kantan-main-screen",
+           f"ujust kantan-reset-dock; ujust kantan-display-info; {PAUSE}"),
 ]) + "".join(app(*a) for a in TOOLS))
 doc += screen("Display & Sound", "HDR and surround sound", "".join([
     action("hdr-on", "Turn HDR on", "Enables HDR and wide colour on every connected display that supports it.",
@@ -145,6 +159,8 @@ doc += screen("Display & Sound", "HDR and surround sound", "".join([
            f"ujust kantan-hdr-off; {PAUSE}"),
     action("audio-71", "Use 7.1 surround over HDMI", "For an AV receiver. Turn the receiver on first. Heights are added by the receiver's upmixer.",
            f"ujust kantan-audio-71; {PAUSE}"),
+    action("atmos", "Films with Dolby Atmos", "Open films with \"Movie Player (Dolby Atmos)\" (right-click a film → Open With). It sends Dolby Atmos, TrueHD and DTS sound untouched to the receiver, like PotPlayer's pass-through on Windows.",
+           "nohup setsid xdg-open \"$HOME/Videos\" >&/dev/null"),
 ]))
 
 os.makedirs(os.path.dirname(OUT), exist_ok=True)

@@ -1,0 +1,38 @@
+#!/usr/bin/bash
+# KantanOS: scans files or folders for viruses with ClamAV and shows the result.
+# Files → right-click → "Scan for viruses", or run it with no arguments for Downloads.
+# Anything found can be moved to a quarantine folder that nothing can open.
+set -u
+TITLE="Virus scan"
+QUARANTINE="${XDG_DATA_HOME:-$HOME/.local/share}/kantanos/quarantine"
+[ $# -gt 0 ] || set -- "$HOME/Downloads"
+
+if ! ls /var/lib/clamav/*.c[lv]d >/dev/null 2>&1; then
+    kdialog --title "$TITLE" --sorry "The list of known viruses hasn't downloaded yet. It downloads by itself while the PC is online; try again in a few minutes."
+    exit 1
+fi
+
+what=$([ $# -eq 1 ] && basename -- "$1" || echo "$# items")
+notify-send -a "$TITLE" -i security-medium "Scanning $what for viruses…" "You can keep working; the result appears when it is done." 2>/dev/null
+log=$(mktemp)
+clamscan --recursive --infected --no-summary --stdout -- "$@" >"$log" 2>/dev/null
+rc=$?
+found=$(grep -E ': .+ FOUND$' "$log" | sed -E 's/: (.+) FOUND$/\t\1/')
+rm -f "$log"
+
+if [ "$rc" -eq 0 ]; then
+    kdialog --title "$TITLE" --msgbox "No viruses found in $what."
+elif [ "$rc" -eq 1 ] && [ -n "$found" ]; then
+    list=$(printf '%s\n' "$found" | awk -F'\t' '{print "• " $1 "   (" $2 ")"}')
+    msg=$(printf 'These files contain known viruses:\n\n%s\n\nMove them to quarantine? They can'"'"'t be opened there, and nothing else is changed.' "$list")
+    if kdialog --title "$TITLE" --yes-label "Move to quarantine" --no-label "Leave them" --warningyesno "$msg"; then
+        mkdir -p "$QUARANTINE" && chmod 700 "$QUARANTINE"
+        printf '%s\n' "$found" | cut -f1 | while IFS= read -r f; do
+            dest="$QUARANTINE/$(date +%Y%m%d-%H%M%S)-$(basename -- "$f")"
+            mv -- "$f" "$dest" && chmod 000 "$dest"
+        done
+        kdialog --title "$TITLE" --msgbox "Moved to quarantine ($QUARANTINE)."
+    fi
+else
+    kdialog --title "$TITLE" --sorry "The scan could not finish (some files may not be readable)."
+fi

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<zone>
+  <short>KantanOS</short>
+  <description>KantanOS home network: other devices can only start connections to the features that need it (phone link, game streaming, finding devices on the network, file sharing). Everything this PC starts itself (web, updates, NAS, games) works as normal. Switch with: ujust kantan-firewall</description>
+  <!-- getting a network address -->
+  <service name="dhcpv6-client"/>
+  <!-- finding printers, the NAS and other devices on the home network -->
+  <service name="mdns"/>
+  <service name="llmnr-client"/>
+  <service name="samba-client"/>
+  <service name="ipp-client"/>
+  <!-- phone link (KDE Connect) -->
+  <service name="kdeconnect"/>
+  <!-- Steam: Remote Play / streaming to a TV, and game copies between PCs at home -->
+  <service name="steam-streaming"/>
+  <service name="steam-lan-transfer"/>
+  <!-- Sunshine game streaming (Moonlight on a TV or phone) -->
+  <port protocol="tcp" port="47984-47990"/>
+  <port protocol="tcp" port="48010"/>
+  <port protocol="udp" port="47998-48000"/>
+  <forward/>
+</zone>

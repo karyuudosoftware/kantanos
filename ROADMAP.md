@@ -34,6 +34,18 @@ What is done, what is next, and the ideas waiting their turn. Updated as work la
 - [ ] Installer: stop a root-only setup (the warning after login is the safety net for now);
       title shows the Fedora release number; firmware boot entry not always created.
 - [ ] Files: window title still says "Dolphin"; drive list shows raw names like "root".
+- [x] Fixes from the first weeks on the real PC (Nov 2026): Windows ISOs not recognised
+      (UDF), "What would you like to do?" and Force Quit missing Qt for Python, Windows-drive
+      notice reworded, `ujust kantan-reset-dock` / `kantan-display-info` /
+      `kantan-main-screen` / `kantan-login-screen-sync` for the dock and login screen with a
+      receiver on HDMI, `ujust kantan-admin-password off`, `ujust kantan-waydroid-text-size`.
+- [ ] Dock missing and login screen not full-size over DisplayPort: confirm the cause on the
+      real PC with `ujust kantan-display-info`.
+- [x] Weather: KantanOS Weather in the top bar (Open-Meteo, any town worldwide; replaces
+      KDE's widget). Apps may ask for the location; `ujust kantan-set-location` fixes the
+      PC's location by town name.
+- [~] Dolby Atmos: HDMI pass-through allowed for TrueHD/E-AC-3/DTS-HD, plus "Movie Player
+      (Dolby Atmos)" (mpv). To confirm on the receiver.
 
 ## Entertainment and games
 
@@ -81,27 +93,36 @@ on the real PC.*
 ## Phone, messaging and smart home
 
 - [x] Phone notifications and file sharing (KDE Connect).
-- [ ] Messaging: Teams, WhatsApp, Signal, Telegram, Messenger, Instagram.
+- [x] Messaging: Signal, Telegram, Teams (Teams for Linux), WhatsApp (ZapZap), Discord in
+      Welcome; Messenger and Instagram as website tiles ("Add shortcut"). WhatsApp for
+      Windows only comes from the Microsoft Store, which Wine can't run.
 - [ ] Smart home: house temperature widget for a Nest thermostat through Home Assistant.
 
 ## AI and accessibility
 
 - [ ] **Local AI:** images, document checking, recipes, and an Android companion app.
-- [ ] **KantanOS Helper:** explains what just crashed (crash reports and logs, in plain
-      words), offers a fix from a fixed list of safe repairs, and can look online for a
-      solution. Asks before every action and every web search; everything can be undone;
-      never takes instructions from what it reads.
+- [x] **KantanOS Helper** (Welcome → Tools, or search "fix"): reads recent crashes, failed
+      services, errors and disk space; its AI explains them in plain words and picks repairs
+      from a fixed list of 11; asks before every repair, web search and online request.
+      AI: Ollama on this PC (Vulkan; Gemma 3 12B with 14 GB+ video memory, else 4B), or any
+      OpenAI-compatible online service (FreeLLMAPI, OpenRouter, ...), or none (keyword
+      suggestions). "Ask Claude Code" hands bigger jobs over with the report.
+- [ ] Helper: open automatically when an app crashes (DrKonqi) and when a service fails.
 - [ ] AI-made shortcuts on the "What would you like to do?" screen.
 - [ ] Accessibility: screen reader plus an AI voice helper that reads and handles email and
       the day's agenda, always asking before it sends or deletes anything.
 
 ## Storage, safety and system
 
-- [ ] Backups every 30 minutes to OneDrive, Google Drive, Dropbox or the NAS; file snapshots
-      to undo changes to documents.
-- [ ] Security: tighten the firewall (the base allows all high ports) and add virus scanning.
+- [~] Backups: Déjà Dup (Google Drive, OneDrive, NAS, USB) and Pika Backup (hourly, older
+      versions of each file) in Welcome → Tools. Still to do: a KantanOS one-step setup and
+      every-30-minutes schedule.
+- [x] Security: strict KantanOS firewall zone (only phone link, game streaming, device
+      discovery and file sharing reachable; `ujust kantan-firewall`), ClamAV with "Scan for
+      viruses" in Files and Welcome → Tools.
 - [ ] Lite edition for small PCs (Azulle Access 3 class).
 
 ## Working setup
 
-- [ ] Claude Code inside KantanOS, with a handoff file so a session there can continue.
+- [x] Claude Code inside KantanOS: "Install Claude Code" in Welcome → Tools, and `CLAUDE.md`
+      in this repository as the handoff file for sessions on either PC.

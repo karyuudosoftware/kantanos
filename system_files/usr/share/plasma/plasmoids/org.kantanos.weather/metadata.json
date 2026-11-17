@@ -1,0 +1,14 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [ { "Name": "KantanOS (built with Claude)" } ],
+        "Category": "Environment and Weather",
+        "Description": "Weather for your town anywhere in the world (Open-Meteo): now, the next hours and the week",
+        "Icon": "weather-few-clouds",
+        "Id": "org.kantanos.weather",
+        "License": "GPL-2.0-or-later",
+        "Name": "KantanOS Weather",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

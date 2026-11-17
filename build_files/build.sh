@@ -19,6 +19,10 @@ dnf5 -y install \
     glibc-langpack-ja langpacks-core-ja \
     rsms-inter-fonts rsms-inter-vf-fonts \
     mpv
+# Qt for Python: the "What would you like to do?" screen and Force Quit are written with it.
+# Installed explicitly because the base image stopped including it (Nov 2026).
+dnf5 -y install python3-pyside6
+python3 -c "import PySide6.QtQuick"
 
 # Windows programs (kantan-windows): Wine with its .NET and web-view helpers.
 dnf5 -y install wine wine-mono mingw32-wine-gecko mingw64-wine-gecko
@@ -44,6 +48,37 @@ for f in /usr/share/applications/wine-*.desktop; do
     [ -f "$f" ] || continue
     grep -q '^NoDisplay=' "$f" && sed -i 's/^NoDisplay=.*/NoDisplay=true/' "$f" || sed -i '/^\[Desktop Entry\]/a NoDisplay=true' "$f"
 done
+
+# Local AI for the KantanOS Helper: Ollama with its Vulkan backend (runs on NVIDIA, AMD and
+# Intel graphics). Off until the user turns it on in the Helper (kantanos-ollama user
+# service); the model is downloaded then, into their home folder.
+dnf5 -y install ollama ollama-vulkan
+# The Helper's voice: Piper text-to-speech on this PC (the voice itself downloads on first use)
+dnf5 -y install python3-piper-tts pipewire-utils
+python3 -c "import piper"
+systemctl disable ollama.service 2>/dev/null || true
+
+# Virus scanning: ClamAV, its list of known viruses kept up to date in the background, and
+# "Scan for viruses" in Files (/usr/libexec/kantanos/virus-scan).
+dnf5 -y install clamav clamav-update
+sed -i 's/^Example/#Example/' /etc/freshclam.conf 2>/dev/null || true
+systemctl enable clamav-freshclam.service
+
+# Firewall: the KantanOS zone (only the features that need incoming connections) instead of
+# Fedora Workstation's, which allows every port above 1024 and SSH.
+sed -i 's/^DefaultZone=.*/DefaultZone=KantanOS/' /etc/firewalld/firewalld.conf
+grep -q '^DefaultZone=KantanOS' /etc/firewalld/firewalld.conf
+firewall-offline-cmd --check-config >/dev/null
+
+# Windows-drive notice (Bazzite's NTFS/exFAT monitor): KantanOS name and plainer English.
+NTFS_NOTE=/usr/libexec/ntfs-exfat-monitor-script
+if [ -f "$NTFS_NOTE" ]; then
+    sed -i -e 's/^sender="Bazzite"/sender="KantanOS"/' \
+        -e 's/header=("Unsupported filesystem")/header=("Windows drive connected")/' \
+        -e 's/warning=("You have mounted an NTFS\/exFAT (Windows) partition\. You can use it for storing data, however running games from Windows drives will cause problems\.")/warning=("Your files on this Windows (NTFS or exFAT) drive work normally. Only games should go on a KantanOS drive: games installed on a Windows drive often fail to start.")/' \
+        "$NTFS_NOTE"
+    grep -q 'sender="KantanOS"' "$NTFS_NOTE" && grep -q "Windows drive connected" "$NTFS_NOTE"
+fi
 
 ### 3. Identity ---------------------------------------------------------------
 # ID stays "bazzite" so the Universal Blue tooling keeps working; the names change.

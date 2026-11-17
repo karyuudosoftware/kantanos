@@ -107,3 +107,130 @@ kantan-update:
 kantan-undo-update:
     #!/usr/bin/bash
     sudo bootc rollback && echo "Restart the PC to return to the previous version."
+
+# Show the screens and where the dock and top bar are (helps when the dock is missing)
+kantan-display-info:
+    #!/usr/bin/bash
+    /usr/libexec/kantanos/dock-repair info
+
+# Put the KantanOS Dock back (keeps its apps)
+kantan-reset-dock:
+    #!/usr/bin/bash
+    /usr/libexec/kantanos/dock-repair reset
+
+# Choose the main screen (the dock, top bar and login screen go there). An AV receiver
+# connected by HDMI can count as a screen of its own.
+kantan-main-screen OUTPUT="":
+    #!/usr/bin/bash
+    source /usr/lib/ujust/ujust.sh
+    out="{{ OUTPUT }}"
+    if [ -z "$out" ]; then
+        mapfile -t rows < <(kscreen-doctor -j | jq -r '.outputs[] | select(.connected) |
+            "\(.name)  (\(if .enabled then "on" else "off" end), priority \(.priority // "-"), \(.size.width // 0)x\(.size.height // 0))"')
+        [ "${#rows[@]}" -gt 0 ] || { echo "No screens found."; exit 1; }
+        echo "Which screen is your TV or monitor?"
+        choice=$(Choose "${rows[@]}")
+        out=${choice%% *}
+    fi
+    kscreen-doctor "output.$out.enable" "output.$out.priority.1" && echo "$out is now the main screen."
+    ujust kantan-login-screen-sync
+
+# Make the login screen use the same screen layout as your desktop
+kantan-login-screen-sync:
+    #!/usr/bin/bash
+    cfg="$HOME/.config/kwinoutputconfig.json"
+    [ -f "$cfg" ] || { echo "No screen layout saved yet: change something in System Settings → Display first."; exit 1; }
+    sudo install -d -o plasmalogin -g plasmalogin -m 0755 /var/lib/plasmalogin/.config
+    sudo install -o plasmalogin -g plasmalogin -m 0644 "$cfg" /var/lib/plasmalogin/.config/kwinoutputconfig.json
+    echo "Done. The login screen uses your screen layout from the next restart."
+
+# Stop (off) or restore (on) the admin password prompts for your account
+kantan-admin-password STATE="status":
+    #!/usr/bin/bash
+    rules=/etc/polkit-1/rules.d/40-kantanos-no-admin-password.rules
+    sudoers=/etc/sudoers.d/40-kantanos-no-admin-password
+    case "{{ STATE }}" in
+        off)
+            id -nG | grep -qw wheel || { echo "Only an administrator account can do this."; exit 1; }
+            echo "After this, $USER is never asked for the password for system changes, and"
+            echo "neither is any program $USER runs. Other accounts still are."
+            read -r -p "Turn admin password prompts off for $USER? [y/N] " ok
+            [ "${ok,,}" = y ] || exit 0
+            printf '%s\n' "// KantanOS: no admin password prompts for $USER (ujust kantan-admin-password on undoes this)" \
+                "polkit.addRule(function(action, subject) {" \
+                "    if (subject.user == \"$USER\" && subject.local && subject.active) return polkit.Result.YES;" \
+                "});" | sudo tee "$rules" >/dev/null
+            tmp=$(mktemp); echo "$USER ALL=(ALL) NOPASSWD: ALL" > "$tmp"
+            if sudo visudo -cf "$tmp" >/dev/null; then sudo install -m 0440 "$tmp" "$sudoers"; fi
+            rm -f "$tmp"
+            echo "Done: no more admin password prompts for $USER."
+            ;;
+        on)
+            sudo rm -f "$rules" "$sudoers"
+            echo "Done: system changes ask for the admin password again."
+            ;;
+        *)
+            if [ -e "$rules" ]; then echo "Admin password prompts are OFF ($(grep -o 'user == "[^"]*"' "$rules"))."
+            else echo "Admin password prompts are on (the normal setting)."; fi
+            echo "Change with: ujust kantan-admin-password off   or   ujust kantan-admin-password on"
+            ;;
+    esac
+
+# Bigger or smaller text in Android apps (Waydroid): small, medium, large (default) or huge
+kantan-waydroid-text-size SIZE="large":
+    #!/usr/bin/bash
+    case "{{ SIZE }}" in
+        small) dpi=160 ;; medium) dpi=213 ;; large) dpi=280 ;; huge) dpi=360 ;;
+        [0-9]*) dpi="{{ SIZE }}" ;;
+        *) echo "Use small, medium, large or huge."; exit 2 ;;
+    esac
+    prop=/var/lib/waydroid/waydroid_base.prop
+    sudo test -f "$prop" || { echo "Set up Android apps first: ujust setup-waydroid"; exit 1; }
+    sudo sed -i '/^ro.sf.lcd_density=/d' "$prop"
+    echo "ro.sf.lcd_density=$dpi" | sudo tee -a "$prop" >/dev/null
+    waydroid session stop 2>/dev/null || true
+    sudo systemctl restart waydroid-container
+    echo "Android text size set to {{ SIZE }} ($dpi). Open Waydroid again to see it."
+
+# Set this PC's location by town name (for weather and clocks); "clear" goes back to automatic
+kantan-set-location PLACE="":
+    #!/usr/bin/bash
+    place="{{ PLACE }}"
+    if [ "$place" = clear ]; then
+        sudo rm -f /etc/geolocation && sudo systemctl restart geoclue 2>/dev/null
+        echo "Location is found automatically again."; exit 0
+    fi
+    [ -n "$place" ] || read -r -p "Your town or city (for example: Toronto, Canada): " place
+    [ -n "$place" ] || exit 1
+    # OpenStreetMap's place search; only the town name you typed is sent
+    hit=$(curl -fsS -G -A "KantanOS-location-setup" --data-urlencode "q=$place" \
+          -d format=json -d limit=1 https://nominatim.openstreetmap.org/search \
+          | jq -r '.[0] | select(.) | "\(.lat) \(.lon) \(.display_name)"')
+    [ -n "$hit" ] || { echo "Couldn't find \"$place\". Try adding the country."; exit 1; }
+    read -r lat lon name <<< "$hit"
+    echo "Found: $name"
+    read -r -p "Use this as the PC's location? [Y/n] " ok
+    [ "${ok,,}" = n ] && exit 0
+    printf '# KantanOS: fixed location for this PC (ujust kantan-set-location)\n%s\n%s\n0\n1000\n' "$lat" "$lon" \
+        | sudo tee /etc/geolocation >/dev/null
+    sudo chmod 0644 /etc/geolocation
+    sudo systemctl restart geoclue 2>/dev/null || true
+    echo "Done. Weather apps use this location from now on (restart any that are open)."
+
+# Firewall: "strict" (KantanOS, the normal setting) or "open" (Fedora's, every port above 1024)
+kantan-firewall STATE="status":
+    #!/usr/bin/bash
+    case "{{ STATE }}" in
+        strict) sudo firewall-cmd --set-default-zone=KantanOS && echo "Firewall: KantanOS (strict)." ;;
+        open)
+            echo "This lets other devices on your network connect to any program on this PC that listens."
+            read -r -p "Open the firewall? [y/N] " ok
+            [ "${ok,,}" = y ] && sudo firewall-cmd --set-default-zone=FedoraWorkstation && echo "Firewall: open. Undo with: ujust kantan-firewall strict"
+            ;;
+        *)
+            zone=$(firewall-cmd --get-default-zone 2>/dev/null)
+            echo "Firewall zone: $zone"
+            [ "$zone" = KantanOS ] && echo "Strict: only phone link, game streaming, device discovery and file sharing can be reached from the network."
+            echo "Change with: ujust kantan-firewall strict   or   ujust kantan-firewall open"
+            ;;
+    esac

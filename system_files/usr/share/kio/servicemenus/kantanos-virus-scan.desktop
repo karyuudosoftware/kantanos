@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Service
+MimeType=all/all;
+Actions=scan
+X-KDE-StartupNotify=false
+
+[Desktop Action scan]
+Name=Scan for viruses
+Icon=security-medium
+Exec=/usr/libexec/kantanos/virus-scan %F

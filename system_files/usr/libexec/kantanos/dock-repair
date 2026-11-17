@@ -1,0 +1,75 @@
+#!/usr/bin/bash
+# KantanOS: shows the screens and desktop panels, or puts the KantanOS Dock back.
+#   dock-repair info    screens (as the desktop sees them) and where each panel is
+#   dock-repair reset   remove bottom panels and add a fresh KantanOS Dock, keeping its apps
+# Runs as the signed-in user; talks to the running desktop (plasmashell).
+set -u
+# Also works from a text console or SSH: borrow the desktop session's display
+if [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    eval "$(systemctl --user show-environment 2>/dev/null | grep -E '^(WAYLAND_DISPLAY|DISPLAY)=' | sed 's/^/export /')"
+fi
+shell_script() {
+    busctl --user call org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell evaluateScript s "$1" \
+        | sed -e 's/^s "//' -e 's/"$//' -e 's/\\n/\n/g'
+}
+
+PANELS_JS='
+var ps = panels();
+for (var i = 0; i < ps.length; i++) {
+    var names = [];
+    var ws = ps[i].widgets();
+    for (var j = 0; j < ws.length; j++) names.push(ws[j].type);
+    print("panel " + (i + 1) + ": " + ps[i].location + " edge, screen " + ps[i].screen +
+          ", hiding " + ps[i].hiding + ", " + ws.length + " items: " + names.join(" ") + "\n");
+}'
+
+RESET_JS='
+var ps = panels();
+var launchers = [];
+for (var i = 0; i < ps.length; i++) {
+    if (ps[i].location !== "bottom") continue;
+    var ws = ps[i].widgets();
+    for (var j = 0; j < ws.length; j++) {
+        if (ws[j].type === "org.kantanos.dock" || ws[j].type === "org.kde.plasma.icontasks") {
+            ws[j].currentConfigGroup = ["General"];
+            var l = ws[j].readConfig("launchers", []);
+            if (l.length > launchers.length) launchers = l;
+        }
+    }
+    ps[i].remove();
+}
+if (launchers.length === 0)
+    launchers = ["applications:kantanos-modes.desktop", "applications:org.kde.dolphin.desktop",
+                 "applications:org.mozilla.firefox.desktop", "applications:io.github.kolunmi.Bazaar.desktop",
+                 "applications:steam.desktop", "applications:org.kde.konsole.desktop",
+                 "applications:systemsettings.desktop"];
+var dock = new Panel;
+dock.location = "bottom";
+dock.height = Math.round(gridUnit * 5.6);
+dock.lengthMode = "fit";
+dock.alignment = "center";
+dock.floating = false;
+dock.hiding = "dodgewindows";
+var w = dock.addWidget("org.kantanos.dock");
+w.currentConfigGroup = ["General"];
+w.writeConfig("launchers", launchers);
+print("New dock on screen " + dock.screen + " with " + launchers.length + " apps.");'
+
+case "${1:-info}" in
+    info)
+        echo "== Screens"
+        kscreen-doctor -o 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep -E '^Output|priority|Modes|Geometry|Scale|enabled|disabled' \
+            | grep -v -E '^\s+Modes:' || echo "(kscreen-doctor not available)"
+        echo
+        echo "== Panels"
+        shell_script "$PANELS_JS"
+        ;;
+    reset)
+        shell_script "$RESET_JS"
+        echo
+        echo "If the dock is still not visible, it is probably on another screen (for example"
+        echo "an AV receiver connected by HDMI counts as a screen). Run: ujust kantan-display-info"
+        ;;
+    *)
+        echo "usage: dock-repair info | reset"; exit 2 ;;
+esac

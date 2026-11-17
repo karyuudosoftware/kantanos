@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=KantanOS Helper
+GenericName=Fix a problem
+Comment=Finds out what's wrong, explains it in plain words and offers safe fixes
+Exec=/usr/libexec/kantanos/helper %u
+Icon=help-browser
+Categories=System;Utility;
+Keywords=help;fix;problem;broken;repair;ai;assistant;troubleshoot;
