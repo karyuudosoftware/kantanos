@@ -24,6 +24,8 @@ clock.writeConfig("dateDisplayFormat", "BesideTime");
 clock.writeConfig("dateFormat", "longDate");
 
 topBar.addWidget("org.kde.plasma.panelspacer");
+// KantanOS Stats: processor, graphics, memory and network at a glance (click for details)
+topBar.addWidget("org.kantanos.stats");
 // KantanOS Weather: works anywhere (Open-Meteo); finds the town set with kantan-set-location
 topBar.addWidget("org.kantanos.weather");
 topBar.addWidget("org.kde.plasma.systemtray");

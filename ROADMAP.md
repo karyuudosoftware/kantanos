@@ -43,7 +43,10 @@ What is done, what is next, and the ideas waiting their turn. Updated as work la
       real PC with `ujust kantan-display-info`.
 - [x] Weather: KantanOS Weather in the top bar (Open-Meteo, any town worldwide; replaces
       KDE's widget). Apps may ask for the location; `ujust kantan-set-location` fixes the
-      PC's location by town name.
+      PC's location by town name. Without a set town it now finds the area by itself (GeoClue).
+- [x] KantanOS Stats in the top bar (like the Mac "Stats" app): small graphs, bars or numbers
+      for processor, graphics card, memory, drive, network and temperature; click for gauges,
+      per-thread bars, history, busiest apps, every drive. Settings pick what's shown.
 - [~] Dolby Atmos: HDMI pass-through allowed for TrueHD/E-AC-3/DTS-HD, plus "Movie Player
       (Dolby Atmos)" (mpv). To confirm on the receiver.
 

@@ -1,0 +1,14 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [ { "Name": "KantanOS (built with Claude)" } ],
+        "Category": "System Information",
+        "Description": "Processor, graphics, memory, drives and network at a glance in the top bar; click for details and the busiest apps",
+        "Icon": "utilities-system-monitor",
+        "Id": "org.kantanos.stats",
+        "License": "GPL-2.0-or-later",
+        "Name": "KantanOS Stats",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
