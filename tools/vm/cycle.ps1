@@ -28,6 +28,10 @@ if (-not $SkipBuild) {
     wsl -d kantan-build -u root -- bash /mnt/d/CLAUDE_Projects/kantanos/tools/vm/export-disk.sh | Select-Object -Last 2
     if ($LASTEXITCODE -ne 0) { 'DISK FAILED'; exit 1 }
     Remove-Item "$d\vars.fd" -ErrorAction SilentlyContinue
+    # The build distro keeps gigabytes of page cache; without this QEMU can fail with
+    # "cannot set up guest memory 'pc.ram'".
+    wsl --terminate kantan-build | Out-Null
+    Start-Sleep -Seconds 5
 }
 
 & "$PSScriptRoot\run-vm.ps1"

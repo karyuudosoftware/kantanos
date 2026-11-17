@@ -114,6 +114,35 @@ on the real PC.*
       suggestions). "Ask Claude Code" hands bigger jobs over with the report.
 - [x] Helper watch: when an app crashes or a background service fails, a notification offers
       "Ask Kan-chan" (opens the Helper already checking), "Not now" or "Don't offer again".
+- [~] Talk to Kan-chan: "Hold to talk" in the Helper; whisper.cpp speech recognition on this
+      PC (English and Japanese), replies read aloud, repairs still only from the fixed list.
+      Later: the air mouse's voice button starts a conversation from anywhere.
+
+### Kan-chan, the companion (optional app, built on the Helper's character, voice and ears)
+
+A character who lives on the PC, not only a repair helper. Optional: switched on in Welcome.
+Decisions so far (Nov 2026):
+- One memory per account (each family member signs in as themselves). Everything she keeps
+  is visible in a "What I remember" page where it can be edited or deleted; nothing leaves
+  the PC. "Remember that ..." / "Forget that ..." work in conversation.
+- Speaking up, all three: she brings things up when opened; optional gentle check-in (at
+  most one notification a day, never during a full-screen game or video); optional desktop
+  buddy (small Kan-chan in a screen corner, click to talk, occasional speech bubble).
+- Online look-ups (topics, recipe ideas): she says what she would search for and asks first.
+  Only the search words go out, never notes or memories.
+- Personality: warm, curious, honest about being an AI character. Politics: neutral; lays
+  out the main viewpoints fairly, keeps to established facts, takes no side.
+- Noticing (each one opt-in): games played (Steam, Heroic, Lutris: title and time only) and
+  shows/films watched (title from the player through MPRIS). She may ask about them later.
+
+Steps:
+- [ ] 1. Kan-chan app: own window (big avatar, chat, talk + typing), memory database
+      (SQLite, per account) with "What I remember", personality and neutrality rules,
+      recipes and everyday chat; hands repairs to the Helper.
+- [ ] 2. Noticing games and shows/films; she asks how they're going.
+- [ ] 3. Online look-ups with ask-first; gentle daily check-in; desktop buddy.
+- [ ] 4. Make your own character: design, personality, voice (character packs already work).
+
 - [ ] AI-made shortcuts on the "What would you like to do?" screen.
 - [ ] Accessibility: screen reader plus an AI voice helper that reads and handles email and
       the day's agenda, always asking before it sends or deletes anything.

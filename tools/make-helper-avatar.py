@@ -133,6 +133,13 @@ def extras(kind):
         return f'<g transform="translate(204,98)">{star}</g><g transform="translate(34,84) scale(0.7)">{star}</g>'
     if kind == "worried":
         return '<path d="M196,92 C192,100 192,106 197,108 C202,106 202,100 196,92 Z" fill="#9fd8ff" stroke="#4b9fe6" stroke-width="1.5"/>'
+    if kind == "listen":
+        # sound coming in towards her ear: three arcs on the left, a little note on the right
+        arcs = "".join(f'<path d="M{24 - 7 * i},{118 - 9 * i} Q{12 - 9 * i},{140} {24 - 7 * i},{162 + 9 * i}" fill="none" '
+                       f'stroke="#3d8bfd" stroke-width="3.2" stroke-linecap="round" opacity="{0.9 - 0.25 * i}"/>' for i in range(3))
+        note = ('<g transform="translate(206,96)" fill="#3d8bfd"><ellipse cx="0" cy="14" rx="6" ry="4.5"/>'
+                '<rect x="4.2" y="-6" width="2.6" height="20" rx="1.2"/><path d="M6.8,-6 Q16,-2 14,8 Q12,0 6.8,0 Z"/></g>')
+        return arcs + note
     return ""
 
 
@@ -144,6 +151,7 @@ FRAMES = {
     "think": ("think", "think", "think"),
     "happy": ("happy", "happy", "happy"),
     "worried": ("worried", "worried", "worried"),
+    "listen": ("open", "smile", "listen"),
 }
 
 

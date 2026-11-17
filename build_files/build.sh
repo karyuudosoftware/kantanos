@@ -56,6 +56,10 @@ dnf5 -y install ollama ollama-vulkan
 # The Helper's voice: Piper text-to-speech on this PC (the voice itself downloads on first use)
 dnf5 -y install python3-piper-tts pipewire-utils
 python3 -c "import piper"
+# ...and its ears: whisper.cpp speech recognition (CPU build bundled in the Python module;
+# the speech model downloads on first use, after asking)
+dnf5 -y install python3-pywhispercpp
+python3 -c "import pywhispercpp.model, numpy"
 systemctl disable ollama.service 2>/dev/null || true
 
 # Virus scanning: ClamAV, its list of known viruses kept up to date in the background, and
