@@ -203,6 +203,9 @@ grep -q 'x-msi=kantanos-windows-program.desktop' /etc/xdg/mimeapps.list
 # Installed systems get the Windows-style local hardware clock once (the installer writes UTC).
 systemctl enable kantanos-local-clock.service
 
+# The system drive is called "KantanOS" in Files, not the installer's label "root" (once).
+systemctl enable kantanos-drive-label.service
+
 # Starter apps (browser, viewers, media player) are installed on first boot.
 systemctl enable kantanos-flatpak-setup.service
 

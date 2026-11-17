@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Restart into Windows
+Name[ja]=Windows で再起動
+Comment=Start Windows once, for games whose anti-cheat needs it
+Comment[ja]=アンチチートが Windows を必要とするゲームのために、Windows を一度だけ起動します
+Exec=/usr/libexec/kantanos/restart-windows
+Icon=system-reboot
+Categories=System;
+Keywords=windows;dual boot;anti-cheat;reboot;restart;

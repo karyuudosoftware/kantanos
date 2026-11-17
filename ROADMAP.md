@@ -33,7 +33,8 @@ What is done, what is next, and the ideas waiting their turn. Updated as work la
       speaker test; look at the channel layout only if that does not fix it.
 - [ ] Installer: stop a root-only setup (the warning after login is the safety net for now);
       title shows the Fedora release number; firmware boot entry not always created.
-- [ ] Files: window title still says "Dolphin"; drive list shows raw names like "root".
+- [~] Files: drive list fixed (system drive named "KantanOS", start-up and Windows helper partitions
+      and the read-only system image hidden); window title still says "Dolphin".
 - [x] Fixes from the first weeks on the real PC (Nov 2026): Windows ISOs not recognised
       (UDF), "What would you like to do?" and Force Quit missing Qt for Python, Windows-drive
       notice reworded, `ujust kantan-reset-dock` / `kantan-display-info` /
@@ -58,7 +59,8 @@ What is done, what is next, and the ideas waiting their turn. Updated as work la
       NAS (NFS rather than iSCSI).
 - [ ] **Vintage Computers:** DOS, Windows 3.x–98, classic Mac OS, Amiga, C64, Atari ST and
       more through existing emulators. Own ROMs/install media only; nothing copyrighted ships.
-- [ ] **Anti-cheat games:** one-click "restart into Windows".
+- [x] **Anti-cheat games:** "Windows" tile on the start screen (only on PCs with Windows), app
+      menu entry and Welcome → Games: Windows starts once (firmware BootNext), no password.
 - [ ] **Remote:** air-mouse remote support, including its voice button.
 
 ## Windows and Android apps
@@ -110,7 +112,8 @@ on the real PC.*
       AI: Ollama on this PC (Vulkan; Gemma 3 12B with 14 GB+ video memory, else 4B), or any
       OpenAI-compatible online service (FreeLLMAPI, OpenRouter, ...), or none (keyword
       suggestions). "Ask Claude Code" hands bigger jobs over with the report.
-- [ ] Helper: open automatically when an app crashes (DrKonqi) and when a service fails.
+- [x] Helper watch: when an app crashes or a background service fails, a notification offers
+      "Ask Kan-chan" (opens the Helper already checking), "Not now" or "Don't offer again".
 - [ ] AI-made shortcuts on the "What would you like to do?" screen.
 - [ ] Accessibility: screen reader plus an AI voice helper that reads and handles email and
       the day's agenda, always asking before it sends or deletes anything.

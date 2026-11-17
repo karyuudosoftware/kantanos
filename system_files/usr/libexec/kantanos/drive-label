@@ -1,0 +1,28 @@
+#!/usr/bin/bash
+# KantanOS (runs as root at start-up, kantanos-drive-label.service): give the system drive the
+# name "KantanOS" in Files instead of the installer's label "root". Only the label changes:
+# KantanOS finds its drive by its ID (UUID), never by label. Runs once; a label someone
+# chose themselves (anything other than the installer's defaults) is left alone.
+set -u
+STAMP=/var/lib/kantanos/drive-label.done
+[ -e "$STAMP" ] && exit 0
+
+dev=$(findmnt -no SOURCE /sysroot 2>/dev/null | sed 's/\[.*\]$//')
+fstype=$(findmnt -no FSTYPE /sysroot 2>/dev/null)
+vardev=$(findmnt -no SOURCE /var 2>/dev/null | sed 's/\[.*\]$//')
+label=$(blkid -s LABEL -o value "$dev" 2>/dev/null || true)
+
+if [ "$fstype" = btrfs ] && [ -b "$dev" ] && [ "$vardev" = "$dev" ] && [[ "$label" =~ ^(root|fedora|fedora_fedora)$ ]]; then
+    # through /var: the same drive, but writable (/sysroot is mounted read-only)
+    if btrfs filesystem label /var KantanOS; then
+        udevadm trigger --action=change "$dev" 2>/dev/null || true
+        echo "system drive $dev: label \"$label\" -> \"KantanOS\""
+    else
+        echo "could not relabel $dev; will try again next start" >&2
+        exit 0
+    fi
+else
+    echo "system drive: nothing to do (type ${fstype:-?}, label \"${label}\")"
+fi
+mkdir -p "$(dirname "$STAMP")"
+touch "$STAMP"

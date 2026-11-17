@@ -1,0 +1,192 @@
+#!/usr/bin/python3
+"""KantanOS Helper watch: when one of your apps crashes, or a background service fails,
+offer the KantanOS Helper in a notification ("Ask Kan-chan" / "Not now"). It never opens a
+window by itself and never repairs anything; the Helper asks before every fix.
+
+Started at login (/etc/xdg/autostart/kantanos-helper-watch.desktop). Turn it off with the
+notification's "Don't offer again" button, or "watch": false in ~/.config/kantanos/helper.json.
+Services that are known to fail harmlessly are listed in
+/usr/share/kantanos/helper/watch-ignore (one shell-style pattern per line).
+"""
+import configparser
+import fnmatch
+import glob
+import json
+import os
+import subprocess
+import sys
+import threading
+import time
+
+HOME = os.path.expanduser("~")
+CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.join(HOME, ".config")), "kantanos", "helper.json")
+IGNORE_FILE = "/usr/share/kantanos/helper/watch-ignore"
+ICON = "/usr/share/kantanos/helper/characters/kan-chan/worried.svg"
+HELPER = "/usr/libexec/kantanos/helper"
+COREDUMP = "fc2e22bc6ee647b6b90729ab34a250b1"       # systemd-coredump: "process ... dumped core"
+UNIT_FAILED = "d9b373ed55a64feb8242e02dbe79a49c"    # systemd: "unit ... failed with result ..."
+QUIET_AFTER_LOGIN = 90       # the first minute and a half after login is noisy; stay quiet
+SAME_APP_GAP = 10 * 60       # one notification per app per ten minutes
+MAX_OPEN = 2                 # never more than two of our notifications at once
+
+
+def load_cfg():
+    try:
+        with open(CONF, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_watch(on):
+    cfg = load_cfg()
+    cfg["watch"] = on
+    os.makedirs(os.path.dirname(CONF), exist_ok=True)
+    fd = os.open(CONF, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=1)
+
+
+def ignore_patterns():
+    try:
+        with open(IGNORE_FILE, encoding="utf-8") as f:
+            return [l.strip() for l in f if l.strip() and not l.startswith("#")]
+    except OSError:
+        return []
+
+
+_names = None
+
+
+def app_name(exe, comm):
+    """A friendly name for a program: the Name= of its app-menu entry if there is one."""
+    global _names
+    if _names is None:
+        _names = {}
+        dirs = ["/usr/share/applications", "/var/lib/flatpak/exports/share/applications",
+                os.path.join(HOME, ".local/share/applications"),
+                os.path.join(HOME, ".local/share/flatpak/exports/share/applications")]
+        for d in dirs:
+            for path in glob.glob(os.path.join(d, "*.desktop")):
+                p = configparser.ConfigParser(interpolation=None, strict=False)
+                try:
+                    p.read(path, encoding="utf-8")
+                    entry = p["Desktop Entry"]
+                except (configparser.Error, KeyError, UnicodeDecodeError):
+                    continue
+                name = entry.get("Name", "").strip()
+                words = entry.get("Exec", "").split()
+                if not name or not words:
+                    continue
+                prog = os.path.basename(words[0])
+                if prog in ("flatpak", "env") and len(words) > 1:
+                    prog = words[-1] if not words[-1].startswith("%") else words[-2]
+                _names.setdefault(os.path.basename(prog), name)
+                _names.setdefault(os.path.basename(path)[:-8].split(".")[-1].lower(), name)
+    for key in (os.path.basename(exe or ""), comm, (comm or "").lower()):
+        if key and key in _names:
+            return _names[key]
+    return None     # not an app from the app menu (a background or command-line program)
+
+
+def unit_name(unit):
+    n = unit
+    for suffix in (".service", ".scope", ".path", ".timer", ".socket", ".mount"):
+        if n.endswith(suffix):
+            n = n[: -len(suffix)]
+    n = n.encode().decode("unicode_escape") if "\\x" in n else n
+    if n.startswith("app-") and "@" in n:
+        n = n[4:].split("@")[0]
+    return n
+
+
+class Watch:
+    def __init__(self):
+        self.started = time.monotonic()
+        self.recent = {}          # key -> time of the last notification
+        self.open = 0
+        self.lock = threading.Lock()
+        self.uid = str(os.getuid())
+        self.ignore = ignore_patterns()
+
+    def stopping(self):
+        r = subprocess.run(["systemctl", "is-system-running"], capture_output=True, text=True)
+        return r.stdout.strip() in ("stopping", "starting")
+
+    def offer(self, key, title, body, problem):
+        now = time.monotonic()
+        with self.lock:
+            if now - self.started < QUIET_AFTER_LOGIN or self.open >= MAX_OPEN:
+                return
+            if now - self.recent.get(key, -1e9) < SAME_APP_GAP:
+                return
+            if not load_cfg().get("watch", True):
+                return
+            self.recent[key] = now
+            self.open += 1
+        threading.Thread(target=self.notify, args=(title, body, problem), daemon=True).start()
+
+    def notify(self, title, body, problem):
+        try:
+            r = subprocess.run(
+                ["notify-send", "--app-name=KantanOS Helper", f"--icon={ICON}", "--urgency=normal",
+                 "--expire-time=60000", "--action=help=Ask Kan-chan", "--action=later=Not now",
+                 "--action=never=Don't offer again", title, body],
+                capture_output=True, text=True)
+            choice = r.stdout.strip()
+            if choice == "help":
+                subprocess.Popen(["systemd-run", "--user", "--collect", "--quiet", HELPER, problem],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif choice == "never":
+                save_watch(False)
+        except OSError:
+            pass
+        finally:
+            with self.lock:
+                self.open -= 1
+
+    def handle(self, e):
+        mid = e.get("MESSAGE_ID")
+        if mid == COREDUMP:
+            if e.get("COREDUMP_UID") != self.uid:          # only this person's own apps
+                return
+            exe, comm = e.get("COREDUMP_EXE", ""), e.get("COREDUMP_COMM", "")
+            name = app_name(exe, comm)
+            if not name:          # only apps people open themselves; the Helper's check-up
+                return            # still lists every crash
+            self.offer("crash:" + (comm or exe), f"{name} closed unexpectedly",
+                       "Kan-chan can look at what went wrong and suggest a fix.",
+                       f"{name} closed unexpectedly (it crashed).")
+        elif mid == UNIT_FAILED:
+            unit = e.get("USER_UNIT") or e.get("UNIT") or ""
+            if not unit or unit.startswith(("run-", "app-")) or unit.endswith(".scope"):
+                return          # transient units and apps: their crashes are reported above
+            if e.get("UNIT_RESULT") in ("core-dump", "signal"):
+                return          # a crash: the coredump message covers it (once, with a name)
+            if any(fnmatch.fnmatch(unit, p) for p in self.ignore) or self.stopping():
+                return
+            name = unit_name(unit)
+            self.offer("unit:" + unit, "Something in the background stopped working",
+                       f"“{name}” failed. Kan-chan can look at it and suggest a fix.",
+                       f"The background service “{name}” failed.")
+
+    def run(self):
+        cmd = ["journalctl", "--follow", "--lines=0", "--output=json",
+               f"MESSAGE_ID={COREDUMP}", f"MESSAGE_ID={UNIT_FAILED}"]
+        while True:
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            for line in p.stdout:
+                try:
+                    self.handle(json.loads(line))
+                except (ValueError, TypeError):
+                    continue
+            p.wait()
+            time.sleep(30)      # journalctl ended (journal rotated, etc.): start again
+
+
+if __name__ == "__main__":
+    if not load_cfg().get("watch", True):
+        sys.exit(0)
+    if len(sys.argv) > 1 and sys.argv[1] == "--now":      # for testing: no quiet minute
+        QUIET_AFTER_LOGIN = 0
+    Watch().run()

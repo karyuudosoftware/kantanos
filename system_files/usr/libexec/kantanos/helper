@@ -188,11 +188,19 @@ def unit_name(unit):
 def gather():
     """A short report of recent trouble: crashes, failed services, errors, disk space."""
     report, findings = [], []
-    crashes = run(["coredumpctl", "list", "--since=-2d", "--no-legend", "--no-pager", "-r"]).splitlines()[:8]
+    # Crashes as JSON (the plain listing's last column changed between versions: it can be
+    # the core size, not the program)
+    try:
+        crashes = json.loads(run(["coredumpctl", "list", "--since=-2d", "--no-pager", "--json=short"]) or "[]")
+    except ValueError:
+        crashes = []
+    crashes = [c for c in crashes if isinstance(c, dict) and c.get("exe")][-8:][::-1]
     if crashes:
-        names = sorted({line.split()[-1].rsplit("/", 1)[-1] for line in crashes if line.split()})
+        names = sorted({os.path.basename(c["exe"]) for c in crashes})
         findings.append("Apps that crashed in the last two days: " + ", ".join(names))
-        report.append("Recent crashes (newest first):\n" + "\n".join(crashes))
+        report.append("Recent crashes (newest first):\n" + "\n".join(
+            f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(c.get('time', 0) / 1e6))}  "
+            f"{c['exe']}  signal {c.get('sig', '?')}" for c in crashes))
     for scope, args in (("system", []), ("your account", ["--user"])):
         failed = run(["systemctl", *args, "--failed", "--no-legend", "--plain", "--no-pager"])
         if failed:
@@ -870,6 +878,7 @@ def main():
     w = Helper()
     if len(sys.argv) > 1:                 # e.g. kantanos-helper "no sound from the TV"
         w.problem.setPlainText(" ".join(sys.argv[1:]))
+        QTimer.singleShot(1500, w.start_check)    # opened about a problem: start looking at once
     w.show()
     sys.exit(app.exec())
 

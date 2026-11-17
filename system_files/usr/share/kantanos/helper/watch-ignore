@@ -1,0 +1,11 @@
+# Background services that fail harmlessly: the Helper watch doesn't offer help for these.
+# One shell-style pattern per line, matched against the full unit name.
+nvidia-cdi-refresh.*
+app-nvidia*settings*load@autostart.service
+dbus-:*
+flatpak-*
+rpm-ostreed-automatic.service
+uupd.service
+fwupd-refresh.service
+systemd-coredump@*
+kantanos-windows-*

@@ -112,6 +112,9 @@ ICONS = {
              '<circle cx="33" cy="26.5" r="2.2"/>',
     "web": '<circle cx="24" cy="24" r="17"/><ellipse cx="24" cy="24" rx="7.5" ry="17"/><path d="M7 24h34M10 15h28M10 33h28"/>',
     "add": '<circle cx="24" cy="24" r="17"/><path d="M24 15v18M15 24h18"/>',
+    # restart into another system: a circular arrow around a small window
+    "restart": '<path d="M39.5 26A15.5 15.5 0 1 1 34.5 12.7"/><path d="M35.5 5.5v7.8h-7.8"/>'
+               '<rect x="17" y="18" width="14" height="12" rx="2"/><path d="M17 22h14"/>',
 }
 
 

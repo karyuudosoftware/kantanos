@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>KantanOS</vendor>
+  <action id="org.kantanos.restart-windows">
+    <description>Start Windows once on the next restart</description>
+    <message>Restarting into Windows needs permission to choose the next start-up system.</message>
+    <!-- Only sets a one-time start of the existing Windows entry, like the PC's own
+         start-up menu: no password for the person sitting at the PC. -->
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/kantanos/set-boot-next</annotate>
+  </action>
+</policyconfig>

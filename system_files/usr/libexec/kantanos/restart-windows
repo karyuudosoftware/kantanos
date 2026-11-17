@@ -1,0 +1,50 @@
+#!/usr/bin/bash
+# KantanOS: restart into Windows once (for games whose anti-cheat needs real Windows).
+#   restart-windows           ask, then restart into Windows; the next restart is KantanOS again
+#   restart-windows --check   exit 0 if this PC can start Windows (used to show the tile)
+# Uses the firmware's own "Windows Boot Manager" entry and its one-time BootNext setting, so
+# nothing about the normal start-up order changes.
+set -u
+
+entry() {
+    efibootmgr 2>/dev/null | sed -n -E 's/^Boot([0-9A-Fa-f]{4})\*?[[:space:]]+Windows Boot Manager.*/\1/p' | head -1
+}
+
+ENTRY=$(entry)
+if [ "${1:-}" = "--check" ]; then
+    [ -n "$ENTRY" ]
+    exit
+fi
+
+say() {   # say KIND TEXT [kdialog options]: a dialog on the desktop, plain text in a terminal
+    local kind="$1" text="$2"; shift 2
+    if [ -n "${WAYLAND_DISPLAY:-}${DISPLAY:-}" ] && command -v kdialog >/dev/null; then
+        kdialog --title "Restart into Windows" "--$kind" "$text" "$@"
+        return
+    fi
+    echo "$text"
+    if [ "$kind" = warningcontinuecancel ]; then
+        local answer
+        read -r -p "Restart into Windows? [y/N] " answer || return 1
+        [[ "$answer" =~ ^[YyJj] ]]
+    fi
+}
+
+if [ -z "$ENTRY" ]; then
+    say sorry "Windows wasn't found on this PC.
+
+This works when Windows is installed on one of this PC's drives (it shows in the PC's start-up menu as \"Windows Boot Manager\")."
+    exit 1
+fi
+
+say warningcontinuecancel "Restart into Windows now?
+
+Save your work first: open apps will close.
+Windows starts once. The next time the PC restarts or is switched on, KantanOS starts as usual." \
+    --continue-label "Restart into Windows" || exit 0
+
+if ! pkexec /usr/libexec/kantanos/set-boot-next "$ENTRY"; then
+    say error "Windows could not be chosen for the next start. Nothing was changed."
+    exit 1
+fi
+systemctl reboot

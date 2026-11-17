@@ -7,7 +7,7 @@ Tiles come from *.mode files (INI, section [Mode]):
 
 Keys: Name, Name[ja], Comment, Comment[ja], Icon (desktop, tv, game, retro, web; or a full
 path), Exec (shell command; empty = just go to the desktop), Flatpak (app that is installed
-on first use), Order (number), Hidden (true/false).
+on first use), Order (number), Hidden (true/false), OnlyIf (command; the tile shows only when it\nsucceeds, e.g. the Windows tile only on PCs with Windows).
 
   modes            show the chooser
   modes --login    same, but stay quiet if the user turned "show at startup" off
@@ -31,7 +31,7 @@ USER_DIR = USER_BASE / "modes"
 PREFS = USER_BASE / "modes.conf"
 LOOKS_DIR = Path(os.environ.get("KANTAN_LOOKS_DIR", "/usr/share/kantanos/looks"))
 LOOK_STATE = USER_BASE / "look"
-ICON_NAMES = ("desktop", "tv", "game", "retro", "web", "add")
+ICON_NAMES = ("desktop", "tv", "game", "retro", "web", "add", "restart")
 
 
 def file_url(path):
@@ -145,6 +145,14 @@ def read_mode(path, custom):
         return None
     if section.get("Hidden", "false").strip().lower() == "true":
         return {"id": path.stem, "hidden": True}
+    only_if = section.get("OnlyIf", "").strip()
+    if only_if:
+        try:
+            ok = subprocess.run(["/bin/sh", "-c", only_if], capture_output=True, timeout=5).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            ok = False
+        if not ok:
+            return {"id": path.stem, "hidden": True}
 
     def text(key):
         return section.get(f"{key}[{LANG}]", section.get(key, "")).strip()

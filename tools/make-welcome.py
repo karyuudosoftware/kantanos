@@ -137,6 +137,8 @@ doc += screen("Games", "Game stores and classic consoles", "".join(app(*a) for a
            "nohup setsid lutris >&/dev/null"),
     action("gamemode", "Open Game Mode", "Your whole library, full screen, for a controller (Steam Big Picture).",
            "nohup setsid steam steam://open/bigpicture >&/dev/null"),
+    action("restartwin", "Restart into Windows", "For games whose anti-cheat only works on real Windows (when Windows is installed on this PC). Windows starts once; the next restart is KantanOS again. Also a tile on the \"What would you like to do?\" screen.",
+           "nohup setsid /usr/libexec/kantanos/restart-windows >&/dev/null"),
 ]))
 doc += screen("Tools", "Disk space and system helpers", "".join([
     action("filelight", "Show folder sizes", "See what is filling your drive as a ring chart (Filelight). In Files you can also right-click any folder and choose Show Folder Sizes.",

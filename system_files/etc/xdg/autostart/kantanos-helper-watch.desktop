@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=KantanOS Helper watch
+Comment=Offers the KantanOS Helper when an app crashes or a service fails
+Exec=/usr/libexec/kantanos/helper-watch
+Icon=help-browser
+NoDisplay=true
+X-KDE-autostart-phase=2
+OnlyShowIn=KDE;

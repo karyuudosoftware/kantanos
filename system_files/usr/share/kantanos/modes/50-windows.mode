@@ -1,0 +1,9 @@
+[Mode]
+Name=Windows
+Name[ja]=Windows
+Comment=Restart into Windows once, for games that need it
+Comment[ja]=Windows で一度だけ再起動します（Windows が必要なゲーム用）
+Icon=restart
+Exec=/usr/libexec/kantanos/restart-windows
+OnlyIf=/usr/libexec/kantanos/restart-windows --check
+Order=50

@@ -1,0 +1,11 @@
+#!/usr/bin/bash
+# KantanOS (runs as root through pkexec, policy org.kantanos.restart-windows): make the given
+# firmware entry start once on the next restart. Only "Windows Boot Manager" entries are
+# accepted, so this can't be used to start anything else.
+set -eu
+ID="${1:-}"
+[[ "$ID" =~ ^[0-9A-Fa-f]{4}$ ]] || { echo "usage: set-boot-next XXXX" >&2; exit 2; }
+efibootmgr | grep -q -E "^Boot${ID}\*?[[:space:]]+Windows Boot Manager" \
+    || { echo "Boot${ID} is not Windows Boot Manager" >&2; exit 3; }
+efibootmgr --bootnext "$ID" >/dev/null
+echo "Next start: Windows (Boot${ID}), once."

@@ -1,0 +1,19 @@
+# KantanOS: friendly drive names in Files (Dolphin's "Devices" list comes from udisks).
+#
+# The system drive's main partition shows as "KantanOS" instead of its label "root"; the small
+# start-up partitions every PC has (EFI, /boot) and Windows' hidden helper partitions
+# (Recovery, Microsoft Reserved) are hidden, as Windows' File Explorer does. Drives with
+# your files, including Windows' C: drive, keep their own names.
+SUBSYSTEM!="block", GOTO="kantanos_drive_names_end"
+ENV{DEVTYPE}!="partition", GOTO="kantanos_drive_names_end"
+
+# KantanOS / Fedora atomic system partitions (labels set by the installer)
+ENV{ID_FS_TYPE}=="btrfs", ENV{ID_FS_LABEL}=="root|fedora|fedora_fedora", ENV{UDISKS_NAME}="KantanOS", ENV{UDISKS_ICON_NAME}="drive-harddisk-system"
+ENV{ID_FS_TYPE}=="ext4|xfs", ENV{ID_FS_LABEL}=="boot", ENV{UDISKS_IGNORE}="1"
+
+# EFI system partitions (any drive), Windows Recovery and Microsoft Reserved partitions
+ENV{ID_PART_ENTRY_TYPE}=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b", ENV{UDISKS_IGNORE}="1"
+ENV{ID_PART_ENTRY_TYPE}=="de94bba4-06d1-4d40-a16a-bfd50179d6ac", ENV{UDISKS_IGNORE}="1"
+ENV{ID_PART_ENTRY_TYPE}=="e3c9e316-0b5c-4db8-817d-f92df00215ae", ENV{UDISKS_IGNORE}="1"
+
+LABEL="kantanos_drive_names_end"

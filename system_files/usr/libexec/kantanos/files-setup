@@ -5,7 +5,34 @@
 # sidebar file (so their own changes are never overwritten).
 set -u
 PLACES="${XDG_DATA_HOME:-$HOME/.local/share}/user-places.xbel"
-[ -e "$PLACES" ] && exit 0
+
+# Devices that are part of the running system, not drives: the read-only system image
+# ("/ (overlay)", shown as a nameless, always-full drive) and the temporary /usr layer.
+# Hidden in the sidebar, also for accounts made before this was added (once per device:
+# "Show" in the sidebar's menu brings it back and stays).
+hide_system_devices() {
+    local udi
+    for udi in /org/kde/fstab/overlay/ /org/kde/fstab/overlay/usr; do
+        grep -qF "<UDI>$udi</UDI>" "$PLACES" && continue
+        python3 - "$PLACES" "$udi" <<'PY' || true
+import sys
+path, udi = sys.argv[1], sys.argv[2]
+text = open(path, encoding="utf-8").read()
+item = (' <separator>\n  <info>\n   <metadata owner="http://www.kde.org">\n'
+        f'    <UDI>{udi}</UDI>\n    <isSystemItem>true</isSystemItem>\n    <IsHidden>true</IsHidden>\n'
+        '   </metadata>\n  </info>\n </separator>\n')
+at = text.rfind("</xbel>")
+if at >= 0:
+    open(path + ".tmp", "w", encoding="utf-8").write(text[:at] + item + text[at:])
+    import os; os.replace(path + ".tmp", path)
+PY
+    done
+}
+
+if [ -e "$PLACES" ]; then
+    hide_system_devices
+    exit 0
+fi
 
 xdg-user-dirs-update 2>/dev/null || true
 home="$(realpath "$HOME")"
@@ -75,3 +102,4 @@ entry "remote:/" "Network" "folder-network"
 entry "recentlyused:/files" "Recent" "document-open-recent"
 echo "</xbel>"
 } > "$PLACES.tmp" && mv "$PLACES.tmp" "$PLACES"
+hide_system_devices

@@ -372,6 +372,11 @@ screens:
         description: "Your whole library, full screen, for a controller (Steam Big Picture)."
         default: false
         script: "nohup setsid steam steam://open/bigpicture >&/dev/null"
+      - id: "restartwin"
+        title: "Restart into Windows"
+        description: "For games whose anti-cheat only works on real Windows (when Windows is installed on this PC). Windows starts once; the next restart is KantanOS again. Also a tile on the \"What would you like to do?\" screen."
+        default: false
+        script: "nohup setsid /usr/libexec/kantanos/restart-windows >&/dev/null"
   - title: "Tools"
     description: "Disk space and system helpers"
     actions:

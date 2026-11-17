@@ -1,0 +1,12 @@
+[Unit]
+Description=KantanOS: name the system drive "KantanOS" in Files (once)
+ConditionPathExists=!/var/lib/kantanos/drive-label.done
+After=local-fs.target
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/kantanos/drive-label
+
+[Install]
+WantedBy=multi-user.target
