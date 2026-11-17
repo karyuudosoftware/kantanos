@@ -36,18 +36,18 @@
       <ImageInstall>
         <OSImage>
           <InstallTo><DiskID>0</DiskID><PartitionID>3</PartitionID></InstallTo>
+          <!-- Which edition on the disc, when no product key picks it -->
+          @INSTALLFROM@
         </OSImage>
       </ImageInstall>
       <UserData>
         <AcceptEula>true</AcceptEula>
         <FullName>@USER@</FullName>
         <Organization></Organization>
-        <!-- The user's own key, or Microsoft's public install key for Windows 11 Pro (it only
-             picks the edition; Windows stays unactivated until the user enters their key). -->
-        <ProductKey>
-          <Key>@KEY@</Key>
-          <WillShowUI>OnError</WillShowUI>
-        </ProductKey>
+        <!-- The user's own key; or for Pro, Microsoft's public install key (it only picks the
+             edition; Windows stays unactivated until the user enters their key); or nothing
+             for Enterprise/LTSC discs, which install without one. -->
+        @PRODUCTKEY@
       </UserData>
     </component>
   </settings>

@@ -54,7 +54,10 @@ machine). For programs Wine cannot run (some Office versions, apps with copy pro
 1. Guided setup: checks the PC (virtualisation on, 8 GB memory, 45 GB free), opens
    Microsoft's download page for the Windows 11 ISO (your own download and licence; KantanOS
    never ships or fetches Windows), and takes an optional product key.
-2. Unattended install of Windows 11 Pro in a VM owned by your account (QEMU, Secure Boot,
+   Reads the disc itself to pick the edition: Pro from the regular Windows 11 disc, or a
+   Windows 10/11 (IoT) Enterprise LTSC disc with no key needed; warns about Windows 10
+   editions without security updates. Activate later in Windows.
+2. Unattended install of Windows in a VM owned by your account (QEMU, Secure Boot,
    TPM 2.0; no admin rights), sized for the PC. A first-sign-in script removes ads and
    extras, turns on Remote Desktop for this PC only, and removes the setup password.
 3. Windows programs get their own app menu entries and open as normal windows (FreeRDP
@@ -62,8 +65,9 @@ machine). For programs Wine cannot run (some Office versions, apps with copy pro
    use, pauses after 10 idle minutes and shuts Windows down cleanly on logout.
 4. Not for anti-cheat games: those detect virtual machines; they get "restart into Windows".
 
-*Tested without Windows (firmware, TPM, setup disc, commands). The first full install is
-still to be tried on the real PC.*
+*Tested without Windows: firmware, TPM, setup disc, commands, and edition choice with
+sample discs (`tools/vm/make-test-isos.sh`). The first full install is still to be tried
+on the real PC.*
 
 - [x] Windows programs through Wine: double-click any .exe or .msi to install or run it;
       installed programs land in the app menu and search. One shared Windows space

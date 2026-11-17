@@ -37,7 +37,7 @@ XDG_CONFIG = os.environ.get("XDG_CONFIG_HOME", os.path.join(HOME, ".config"))
 DATA = os.environ.get("KANTAN_WINVM_DIR", os.path.join(XDG_DATA, "kantanos", "windows-vm"))
 CONF = os.path.join(XDG_CONFIG, "kantanos", "windows-vm.json")
 APPS = os.path.join(XDG_DATA, "applications")
-SHARE = "/usr/share/kantanos/windows-vm"
+SHARE = os.environ.get("KANTAN_WINVM_SHARE", "/usr/share/kantanos/windows-vm")   # override for testing
 SELF = os.path.abspath(__file__)
 
 OVMF_CODE = "/usr/share/edk2/ovmf/OVMF_CODE_4M.secboot.qcow2"
@@ -410,25 +410,142 @@ def need_installed():
     return cfg
 
 
-def iso_language(iso):
-    """Checks the ISO is a Windows installer and returns its language, e.g. "en-US"."""
-    listing = subprocess.run(["xorriso", "-indev", iso, "-ls", "/sources/*"],
-                             capture_output=True, text=True).stdout
-    if "install.wim" not in listing.lower() and "install.esd" not in listing.lower():
+class MountedIso:
+    """Attaches an ISO read-only through the desktop's disk service (udisks, no admin rights),
+    like opening it in Files. Windows discs keep their files in UDF, which only the kernel's
+    UDF driver reads (xorriso sees just a "this disc needs UDF" readme)."""
+
+    def __init__(self, iso):
+        self.iso, self.dev, self.path = iso, None, None
+
+    def __enter__(self):
+        r = subprocess.run(["udisksctl", "loop-setup", "--no-user-interaction", "-r", "-f", self.iso],
+                           capture_output=True, text=True)
+        m = re.search(r"(/dev/loop\d+)", r.stdout)
+        if not m:
+            raise OSError(r.stderr.strip() or "could not attach the disc image")
+        self.dev = m.group(1)
+        for _ in range(20):
+            target = subprocess.run(["findmnt", "-n", "-o", "TARGET", "--source", self.dev],
+                                    capture_output=True, text=True).stdout.strip()
+            if target:
+                self.path = target.splitlines()[0]
+                return self.path
+            subprocess.run(["udisksctl", "mount", "--no-user-interaction", "-b", self.dev, "-o", "ro"],
+                           capture_output=True)
+            time.sleep(0.5)
+        self.__exit__()
+        raise OSError("could not open the disc image")
+
+    def __exit__(self, *_):
+        if self.dev:
+            subprocess.run(["udisksctl", "unmount", "--no-user-interaction", "-b", self.dev], capture_output=True)
+            subprocess.run(["udisksctl", "loop-delete", "--no-user-interaction", "-b", self.dev], capture_output=True)
+
+
+def find_file(folder, name):
+    """Case-insensitive lookup (Windows discs are not consistent about case)."""
+    try:
+        for entry in os.listdir(folder):
+            if entry.lower() == name.lower():
+                return os.path.join(folder, entry)
+    except OSError:
+        pass
+    return None
+
+
+def wim_editions(path):
+    """The Windows editions in install.wim / install.esd, from the XML index every WIM
+    file carries (its location is in the 208-byte header; the XML itself is not compressed)."""
+    import xml.etree.ElementTree as ET
+    with open(path, "rb") as f:
+        head = f.read(208)
+        if head[:5] != b"MSWIM":
+            return []
+        size = int.from_bytes(head[72:79], "little")
+        offset = int.from_bytes(head[80:88], "little")
+        if not 0 < size < 64 * 1024 * 1024:
+            return []
+        f.seek(offset)
+        raw = f.read(size)
+    try:
+        root = ET.fromstring(raw.decode("utf-16", errors="replace").lstrip("﻿"))
+    except ET.ParseError:
+        return []
+    editions = []
+    for image in root.findall("IMAGE"):
+        win = image.find("WINDOWS")
+        editions.append({
+            "index": int(image.get("INDEX", "0")),
+            "name": image.findtext("DISPLAYNAME") or image.findtext("NAME") or "Windows",
+            "edition": (win.findtext("EDITIONID") if win is not None else "") or "",
+            "build": int((win.findtext("VERSION/BUILD") if win is not None else "") or 0),
+        })
+    return editions
+
+
+def inspect_iso(iso):
+    """Returns {"lang": "en-US", "editions": [...]}, or None if it isn't a Windows installer."""
+    with MountedIso(iso) as root:
+        sources = find_file(root, "sources")
+        image = sources and (find_file(sources, "install.wim") or find_file(sources, "install.esd"))
+        if not image:
+            return None
+        editions = wim_editions(image)
+        lang = "en-US"
+        lang_ini = find_file(sources, "lang.ini")
+        if lang_ini:
+            text = open(lang_ini, encoding="utf-8-sig", errors="replace").read()
+            m = re.search(r"\[Available UI Languages\]\s*\n\s*([a-zA-Z]{2,3}-[a-zA-Z]{2,4})", text)
+            if m:
+                code, region = m.group(1).split("-", 1)
+                lang = f"{code.lower()}-{region.upper()}"
+    return {"lang": lang, "editions": editions}
+
+
+# Editions with Remote Desktop, best first. Home ("Core") has no Remote Desktop.
+EDITION_ORDER = ["Professional", "IoTEnterpriseS", "EnterpriseS", "Enterprise",
+                 "ProfessionalWorkstation", "ProfessionalEducation", "Education",
+                 "IoTEnterpriseSEval", "EnterpriseSEval", "EnterpriseEval"]
+# End of security updates for the long-term (LTSC) editions, by edition and build.
+LTSC_END = {("IoTEnterpriseS", 26100): "October 2034", ("EnterpriseS", 26100): "October 2029",
+            ("IoTEnterpriseS", 19044): "January 2032", ("EnterpriseS", 19044): "January 2027",
+            ("IoTEnterpriseS", 17763): "January 2029", ("EnterpriseS", 17763): "January 2029"}
+
+
+def choose_edition(editions, key):
+    """Picks the edition to install and how: returns a plan dict, or None if the disc has
+    no edition with Remote Desktop.
+      • a key from the user: Windows picks the edition that matches it;
+      • Pro: Microsoft's public Pro install key (Windows stays unactivated until the user
+        enters their own key in Windows);
+      • Enterprise / LTSC discs install without a key; activate later in Windows."""
+    if not editions:          # edition list unreadable (e.g. some install.esd discs): assume Pro
+        return {"image_index": 0, "edition": "Professional", "edition_name": "Windows Pro", "build": 0,
+                "product_key": key or GENERIC_PRO_KEY, "use_index": False}
+    usable = [e for e in editions if e["edition"] in EDITION_ORDER]
+    if not usable:
         return None
-    with tempfile.TemporaryDirectory() as tmp:
-        subprocess.run(["xorriso", "-osirrox", "on", "-indev", iso, "-extract",
-                        "/sources/lang.ini", os.path.join(tmp, "lang.ini")],
-                       capture_output=True)
-        try:
-            text = open(os.path.join(tmp, "lang.ini"), encoding="utf-8-sig", errors="replace").read()
-        except OSError:
-            return "en-US"
-    m = re.search(r"\[Available UI Languages\]\s*\n\s*([a-zA-Z]{2,3}-[a-zA-Z]{2,4})", text)
-    if not m:
-        return "en-US"
-    lang, region = m.group(1).split("-", 1)
-    return f"{lang.lower()}-{region.upper()}"
+    e = min(usable, key=lambda x: EDITION_ORDER.index(x["edition"]))
+    plan = {"image_index": e["index"], "edition": e["edition"], "edition_name": e["name"],
+            "build": e["build"], "product_key": key or None, "use_index": not key}
+    if not key and e["edition"] == "Professional":
+        plan["product_key"] = GENERIC_PRO_KEY
+    return plan
+
+
+def support_note(plan):
+    """A warning to show before installing, or None."""
+    edition, build, name = plan["edition"], plan["build"], plan["edition_name"]
+    if edition.endswith("Eval"):
+        return f"{name} is an evaluation copy: it stops working after 90 days."
+    end = LTSC_END.get((edition, build))
+    if build and build < 22000:
+        if end:
+            return f"{name} gets security updates until {end}."
+        return (f"{name}: Windows 10 no longer gets security updates, so it is not safe to use "
+                "online. Windows 11, or a Windows 10/11 LTSC edition, is a better choice.")
+    return None
 
 
 def host_timezone():
@@ -457,18 +574,7 @@ def make_password():
 
 def build_setup_disc(cfg):
     """The answers disc: autounattend.xml plus the KantanOS scripts Windows runs."""
-    lang = cfg["lang"]
-    user_locale = os.environ.get("LANG", "").split(".")[0].replace("_", "-") or lang
-    if not re.fullmatch(r"[a-z]{2,3}-[A-Z]{2}", user_locale):
-        user_locale = lang
-    inputs = "ja-JP;en-US" if lang.startswith("ja") else f"{lang};ja-JP"
-    values = {"@LANG@": lang, "@USERLOCALE@": user_locale, "@INPUT@": inputs,
-              "@TZ@": cfg["timezone"], "@USER@": cfg["user"], "@PASSWORD@": cfg["password"],
-              "@KEY@": cfg.get("key") or GENERIC_PRO_KEY}
-    with open(os.path.join(SHARE, "autounattend.xml"), encoding="utf-8") as f:
-        xml = f.read()
-    for k, v in values.items():
-        xml = xml.replace(k, v)
+    xml = render_answers(cfg)
     with tempfile.TemporaryDirectory() as tmp:
         os.makedirs(os.path.join(tmp, "kantanos"))
         fd = os.open(os.path.join(tmp, "autounattend.xml"), os.O_WRONLY | os.O_CREAT, 0o600)
@@ -480,6 +586,47 @@ def build_setup_disc(cfg):
         subprocess.run(["xorriso", "-as", "mkisofs", "-quiet", "-J", "-R", "-V", "KANTANSETUP",
                         "-o", iso, tmp], check=True, stderr=subprocess.DEVNULL)
         os.chmod(iso, 0o600)
+
+
+def render_answers(cfg):
+    lang = cfg["lang"]
+    user_locale = os.environ.get("LANG", "").split(".")[0].replace("_", "-") or lang
+    if not re.fullmatch(r"[a-z]{2,3}-[A-Z]{2}", user_locale):
+        user_locale = lang
+    inputs = "ja-JP;en-US" if lang.startswith("ja") else f"{lang};ja-JP"
+    key = cfg.get("product_key")
+    product_key = (f"<ProductKey><Key>{key}</Key><WillShowUI>OnError</WillShowUI></ProductKey>"
+                   if key else "")
+    install_from = (f"<InstallFrom><MetaData wcm:action=\"add\"><Key>/IMAGE/INDEX</Key>"
+                    f"<Value>{int(cfg['image_index'])}</Value></MetaData></InstallFrom>"
+                    if cfg.get("use_index") and cfg.get("image_index") else "")
+    values = {"@LANG@": lang, "@USERLOCALE@": user_locale, "@INPUT@": inputs,
+              "@TZ@": cfg["timezone"], "@USER@": cfg["user"], "@PASSWORD@": cfg["password"],
+              "@PRODUCTKEY@": product_key, "@INSTALLFROM@": install_from}
+    with open(os.path.join(SHARE, "autounattend.xml"), encoding="utf-8") as f:
+        xml = f.read()
+    for k, v in values.items():
+        xml = xml.replace(k, v)
+    return xml
+
+
+def plan_test(iso, key=""):
+    """Testing aid: what setup would do with this ISO (no VM, no password shown)."""
+    disc = inspect_iso(iso)
+    if not disc:
+        print("not a Windows install disc")
+        return 1
+    plan = choose_edition(disc["editions"], key)
+    print(json.dumps({"lang": disc["lang"], "editions": disc["editions"], "plan": plan,
+                      "note": plan and support_note(plan)}, indent=1))
+    if plan:
+        from xml.dom import minidom
+        answers = render_answers({"lang": disc["lang"], "timezone": host_timezone(), "user": "test",
+                                  "password": "PASSWORD", **plan})
+        print("\n".join(l for l in answers.splitlines() if "ProductKey" in l or "IMAGE/INDEX" in l))
+        minidom.parseString(answers.encode("utf-8"))
+        print("answers file: valid XML")
+    return 0
 
 
 def prepare_disk():
@@ -533,12 +680,13 @@ def setup():
         return
 
     ok, _ = kdialog("--yes-label", "Continue", "--no-label", "Cancel", "--yesno",
-        "This puts Windows 11 inside KantanOS, for Windows programs that don't work otherwise. "
+        "This puts Windows inside KantanOS, for Windows programs that don't work otherwise. "
         "They then open as normal windows and appear in the app menu.\n\n"
-        "• You need the Windows 11 disc image (ISO) from Microsoft's website.\n"
-        "• Windows 11 Pro is installed. Enter your product key now or later in Windows "
-        "(Settings → System → Activation). Until then Windows works but shows an "
-        "“Activate Windows” reminder.\n"
+        "• You need a Windows disc image (ISO): the Windows 11 one from Microsoft's website, "
+        "or a Windows 10/11 LTSC disc if you have that licence.\n"
+        "• From the regular disc, Windows 11 Pro is installed. Enter your product key during "
+        "setup or later in Windows (Settings → System → Activation). Until then Windows works "
+        "but shows an “Activate Windows” reminder.\n"
         "• Installing takes 20–40 minutes and needs no help. Windows uses about 25 GB to start with.\n"
         "• Not for games with anti-cheat: those need a real Windows.")
     if not ok:
@@ -563,25 +711,41 @@ def setup():
                       "*.iso *.ISO|Windows disc image (*.iso)")
     if not ok or not iso:
         return
-    lang = iso_language(iso)
-    if not lang:
+    try:
+        disc = inspect_iso(iso)
+    except OSError as e:
+        error(f"KantanOS could not open that disc image ({e}). Check that the download finished.")
+        return
+    if not disc:
         error("That file is not a Windows install disc. Download the Windows 11 ISO from Microsoft's website.")
         return
+    if not choose_edition(disc["editions"], ""):
+        error("This disc only has Windows Home, which has no Remote Desktop, so KantanOS can't show "
+              "its programs. Use the regular Windows 11 ISO from Microsoft (it includes Pro) or an "
+              "Enterprise/LTSC disc.")
+        return
 
-    ok, key = kdialog("--inputbox", "Your Windows 11 product key (optional).\n\n"
-                      "Leave it empty to enter it later in Windows. Remote Desktop, which KantanOS "
-                      "uses to show Windows programs, needs Windows 11 Pro.", "")
+    ok, key = kdialog("--inputbox", "Your Windows product key (optional).\n\n"
+                      "Leave it empty to activate later in Windows (Settings → System → Activation). "
+                      "Until then Windows works but shows an “Activate Windows” reminder.", "")
     if not ok:
         return
     key = key.strip().upper()
     if key and not re.fullmatch(r"[A-Z0-9]{5}(-[A-Z0-9]{5}){4}", key):
         error("That product key doesn't look right (it is 25 letters and numbers in five groups). "
-              "Leave it empty to enter it later in Windows.")
+              "Leave it empty to activate later in Windows.")
+        return
+    plan = choose_edition(disc["editions"], key)
+    note = support_note(plan)
+    ok, _ = kdialog("--yes-label", "Install", "--no-label", "Cancel", "--yesno",
+                    f"Ready to install {plan['edition_name']}.\n\n" + (note + "\n\n" if note else "")
+                    + "This takes 20–40 minutes. You don't need to do anything while it installs.")
+    if not ok:
         return
 
     cpus = max(2, min(8, (os.cpu_count() or 4) // 2))
     ram_mb = max(4096, min(16384, (mem_kb // 1024) // 4 // 1024 * 1024))
-    cfg = {"iso": iso, "lang": lang, "key": key, "user": windows_user(),
+    cfg = {"iso": iso, "lang": disc["lang"], **plan, "user": windows_user(),
            "password": cfg.get("password") or make_password(), "timezone": host_timezone(),
            "port": cfg.get("port") or free_port(), "cpus": cpus, "ram_mb": ram_mb, "installed": False}
     save(cfg)
@@ -730,6 +894,8 @@ def main():
         sys.exit(run_vm("run"))
     elif cmd == "_install":
         sys.exit(install())
+    elif cmd == "_plan" and len(sys.argv) > 2:
+        sys.exit(plan_test(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else ""))
     elif cmd == "_selftest":
         sys.exit(selftest())
     else:
