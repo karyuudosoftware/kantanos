@@ -116,6 +116,8 @@ on the real PC.*
       "Ask Kan-chan" (opens the Helper already checking), "Not now" or "Don't offer again".
 - [~] Talk to Kan-chan: "Hold to talk" in the Helper; whisper.cpp speech recognition on this
       PC (English and Japanese), replies read aloud, repairs still only from the fixed list.
+      She asks your name the first time you talk: how it's written and how it sounds (typed,
+      or said to her and checked with "Hear it"), so she says it right and spells it right.
       Later: the air mouse's voice button starts a conversation from anywhere.
 
 ### Kan-chan, the companion (optional app, built on the Helper's character, voice and ears)
