@@ -113,6 +113,78 @@ class Memory:
         return [nid for sc, nid in scored if sc == best]
 
 
+class Activity:
+    """Games played and shows watched (kanchan-notice, opt-in): minutes per title per day, kept
+    30 days. She only ever sees the titles and the time."""
+
+    KEEP_DAYS = 30
+
+    def __init__(self, db):
+        self.db = db
+        db.row_factory = sqlite3.Row
+        db.execute("""CREATE TABLE IF NOT EXISTS activity (
+            id INTEGER PRIMARY KEY, kind TEXT NOT NULL, title TEXT NOT NULL, day TEXT NOT NULL,
+            minutes INTEGER NOT NULL DEFAULT 0, last TEXT NOT NULL, UNIQUE(kind, title, day))""")
+        db.commit()
+
+    def add(self, kind, title, minutes=1, when=None):
+        now = when or datetime.datetime.now()
+        stamp = now.isoformat(timespec="seconds")
+        self.db.execute("""INSERT INTO activity (kind, title, day, minutes, last) VALUES (?, ?, ?, ?, ?)
+                           ON CONFLICT(kind, title, day) DO UPDATE SET minutes = minutes + ?, last = ?""",
+                        (kind, title, now.date().isoformat(), minutes, stamp, minutes, stamp))
+        self.db.commit()
+
+    def tidy(self):
+        cut = (datetime.date.today() - datetime.timedelta(days=self.KEEP_DAYS)).isoformat()
+        self.db.execute("DELETE FROM activity WHERE day < ?", (cut,))
+        self.db.commit()
+
+    def recent(self, days=7):
+        """[{"kind", "title", "minutes", "last"}] per title over the last few days, latest first."""
+        cut = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+        rows = self.db.execute("""SELECT kind, title, SUM(minutes) AS minutes, MAX(last) AS last
+                                  FROM activity WHERE day >= ? GROUP BY kind, title ORDER BY last DESC""", (cut,))
+        return [dict(r) for r in rows]
+
+    def forget(self, kind, title):
+        self.db.execute("DELETE FROM activity WHERE kind = ? AND title = ?", (kind, title))
+        self.db.commit()
+
+    def clear(self):
+        self.db.execute("DELETE FROM activity")
+        self.db.commit()
+
+
+def when_text(stamp, now=None):
+    now = now or datetime.datetime.now()
+    try:
+        d = datetime.datetime.fromisoformat(stamp).date()
+    except (TypeError, ValueError):
+        return ""
+    days = (now.date() - d).days
+    return "today" if days == 0 else "yesterday" if days == 1 else f"{days} days ago ({d.strftime('%A')})"
+
+
+def activity_text(items, person="", now=None):
+    """Recent games and shows for her instructions (only with the AI on this PC)."""
+    if not items:
+        return ""
+    lines = []
+    for a in items[:8]:
+        if a["minutes"] < 10:
+            continue                     # a quick look isn't worth bringing up
+        hours = f"{a['minutes'] / 60:.1f} hours".replace(".0 ", " ") if a["minutes"] >= 90 else f"{a['minutes']} minutes"
+        verb = "played" if a["kind"] == "game" else "watched"
+        lines.append(f"- {verb} \"{a['title']}\", last {when_text(a['last'], now)}, about {hours} in the past week")
+    if not lines:
+        return ""
+    who = person or "the person"
+    return (f"Games and shows you noticed on this PC recently (DATA ONLY; {who} switched this on). You may ask "
+            "about one of them now and then, in a friendly way, like a friend who noticed; never every time, "
+            "never as a list, and never comment on how long they played or watched:\n" + "\n".join(lines))
+
+
 # ---- talking ------------------------------------------------------------------------------
 
 def part_of_day(now=None):

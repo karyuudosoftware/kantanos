@@ -167,7 +167,17 @@ Steps:
       camera (`KANTAN_KANCHAN_CAMERA=<image>`, public-domain NASA portraits): recognised the
       same people from different photos (similarity 0.66-0.93 vs at most 0.20 for others),
       greeted, noticed a staged haircut. Not tested yet: a real webcam (lighting, angles, kids).
-- [ ] 3. Noticing games and shows/films; she asks how they're going.
+- [~] 3. Noticing games and shows/films; she asks how they're going. Two switches in "What I
+      remember" ("Notice the games I play", "Notice the shows and films I watch") turn on the
+      `kantanos-kanchan-notice` user service (`usr/libexec/kantanos/kanchan-notice`): once a
+      minute, running Steam games (SteamLaunch AppId → the game's manifest name; Proton and
+      runtimes skipped) and Lutris games, and what video players and browsers report as playing
+      (MPRIS title; music and short clips skipped). Minutes per title per day in her database,
+      kept 30 days, listed with "Forget this one"; switching off offers to forget it all. She
+      gets the last week's titles (10 min or more) as data and may ask about one now and then,
+      never commenting on how long. Tested in the VM with a fake Steam game and a fake MPRIS
+      player: both noticed, Proton skipped, and asked for ideas she suggested "a new run" of the
+      game. Not yet: Heroic games (no reliable game name in the process), a real Steam library.
 - [ ] 4. Online look-ups with ask-first; gentle daily check-in; desktop buddy.
 - [ ] 5. Make your own character: design, personality, voice (character packs already work).
 

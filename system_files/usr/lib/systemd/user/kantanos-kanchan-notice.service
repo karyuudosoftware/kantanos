@@ -1,0 +1,16 @@
+[Unit]
+Description=Kan-chan noticing games and shows (opt-in)
+Documentation=file:///usr/libexec/kantanos/kanchan-notice
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+# Switched on and off from Kan-chan's "What I remember". Only titles and minutes are kept,
+# in her notes database in the home folder; nothing is sent anywhere.
+ExecStart=/usr/libexec/kantanos/kanchan-notice
+Restart=on-failure
+RestartSec=60
+Nice=10
+
+[Install]
+WantedBy=graphical-session.target

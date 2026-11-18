@@ -6,7 +6,9 @@ database in your home folder, all visible and editable in "What I remember"), br
 up, helps with everyday things like what to cook, and hands PC problems to the KantanOS
 Helper. Her voice, ears, name and AI settings are shared with the Helper. If you let her, she
 can see through the webcam while her window is open: she recognises the people you introduce
-to her (on this PC; no photos are kept) and notices things like a new haircut.
+to her (on this PC; no photos are kept) and notices things like a new haircut. She can also
+notice which games you play and which shows you watch (kanchan-notice, each switched on
+separately in "What I remember") and ask how they're going.
 
   kanchan            open her window
   kanchan --enable   put her in the app menu (Welcome does this), then open
@@ -47,6 +49,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QDialogButtonBo
 
 TITLE = "Kan-chan"
 DESKTOP = "kantanos-kanchan.desktop"
+NOTICE_UNIT = "kantanos-kanchan-notice.service"
 # Only for testing with an AI on another PC of your own (the build PC): treat it like the AI on
 # this PC, so notes, names and seeing work. Never set on a family PC.
 TEST_PRIVATE = bool(os.environ.get("KANTAN_KANCHAN_TEST_PRIVATE"))
@@ -73,10 +76,11 @@ def set_in_menu(on):
 class Remembered(QDialog):
     """What I remember: every note, which you can add to, change or delete."""
 
-    def __init__(self, parent, memory, person, people=None):
+    def __init__(self, parent, memory, person, people=None, acts=None, cfg=None):
         super().__init__(parent)
         self.mem = memory
         self.people = people
+        self.acts, self.cfg = acts, cfg
         self.setWindowTitle("What I remember")
         self.resize(560, 480)
         lay = QVBoxLayout(self)
@@ -113,6 +117,28 @@ class Remembered(QDialog):
             prow.addStretch()
             lay.addLayout(prow)
             self.fill_people()
+        if acts is not None and cfg is not None:
+            lay.addWidget(QLabel("Games and shows I've noticed (titles and time only, kept 30 days):"))
+            nrow = QHBoxLayout()
+            self.n_games = QCheckBox("Notice the games I play")
+            self.n_shows = QCheckBox("Notice the shows and films I watch")
+            self.n_games.setChecked(bool(cfg.get("kanchan_notice_games")))
+            self.n_shows.setChecked(bool(cfg.get("kanchan_notice_shows")))
+            for box in (self.n_games, self.n_shows):
+                box.toggled.connect(self.noticing)
+                nrow.addWidget(box)
+            nrow.addStretch()
+            lay.addLayout(nrow)
+            self.noticed = QListWidget()
+            self.noticed.setMaximumHeight(120)
+            lay.addWidget(self.noticed)
+            forget = QPushButton(QIcon.fromTheme("edit-delete"), "Forget this one")
+            forget.clicked.connect(self.forget_noticed)
+            frow = QHBoxLayout()
+            frow.addWidget(forget)
+            frow.addStretch()
+            lay.addLayout(frow)
+            self.fill_noticed()
         close = QDialogButtonBox(QDialogButtonBox.Close)
         close.rejected.connect(self.reject)
         lay.addWidget(close)
@@ -140,6 +166,40 @@ class Remembered(QDialog):
             item.setToolTip(p.get("look") or "")
             item.setData(Qt.UserRole, p["id"])
             self.faces.addItem(item)
+
+    def fill_noticed(self):
+        self.noticed.clear()
+        items = self.acts.recent(days=30)
+        for a in items:
+            what = "Played" if a["kind"] == "game" else "Watched"
+            item = QListWidgetItem(f"{what}: {a['title']}    ({brain.when_text(a['last'])}, {a['minutes']} min)")
+            item.setData(Qt.UserRole, (a["kind"], a["title"]))
+            self.noticed.addItem(item)
+        if not items:
+            item = QListWidgetItem("Nothing yet." if self.n_games.isChecked() or self.n_shows.isChecked()
+                                   else "Switched off.")
+            item.setFlags(Qt.NoItemFlags)
+            self.noticed.addItem(item)
+
+    def noticing(self):
+        self.cfg["kanchan_notice_games"] = self.n_games.isChecked()
+        self.cfg["kanchan_notice_shows"] = self.n_shows.isChecked()
+        H.save(self.cfg)
+        on = self.n_games.isChecked() or self.n_shows.isChecked()
+        subprocess.run(["systemctl", "--user", "enable" if on else "disable", "--now", NOTICE_UNIT],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if not on and self.acts.recent(days=30) and QMessageBox.question(
+                self, TITLE, "Also forget the games and shows I've noticed so far?",
+                QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
+            self.acts.clear()
+        self.fill_noticed()
+
+    def forget_noticed(self):
+        item = self.noticed.currentItem()
+        data = item.data(Qt.UserRole) if item else None
+        if data:
+            self.acts.forget(*data)
+            self.fill_noticed()
 
     def rename_person(self):
         item = self.faces.currentItem()
@@ -186,6 +246,10 @@ class Remembered(QDialog):
         if QMessageBox.question(self, TITLE, "Forget everything I've noted, and everyone's face? This can't be "
                                 "undone.", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
             self.mem.clear()
+            if self.acts is not None:
+                self.acts.clear()
+                if hasattr(self, "noticed"):
+                    self.fill_noticed()
             if self.people is not None:
                 self.people.clear()
                 if hasattr(self, "faces"):
@@ -200,6 +264,7 @@ class Companion(QWidget):
         self.me = H.load_me()
         self.mem = brain.Memory(os.environ.get("KANTAN_KANCHAN_DB", brain.DB))
         self.people = vision.People(self.mem.db)
+        self.acts = brain.Activity(self.mem.db)
         self.cam = self.faces = self.last_frame = None
         self.eye_busy = self.eye_close = self.first_look = self.describing = False
         self.in_view = []                  # what she saw last: [{"pid", "name", "box", "feature"}]
@@ -383,6 +448,10 @@ class Companion(QWidget):
         history = self.chat if private else [{"role": m["role"], "content": H.redact(m["content"])}
                                              for m in self.chat]
         msgs = brain.build_messages(self.char_name, person, notes, history + ([extra] if extra else []))
+        if private and (self.cfg.get("kanchan_notice_games") or self.cfg.get("kanchan_notice_shows")):
+            seen = brain.activity_text(self.acts.recent(), person)
+            if seen:
+                msgs[0]["content"] += "\n\n" + seen
         if private and self.see.isChecked() and self.in_view:     # names and sights never go online
             view = [{"name": p["name"], "change": self.changes.get(p["pid"])} for p in self.in_view]
             self.told = {p["pid"] for p in self.in_view if p["pid"] in self.changes}
@@ -399,7 +468,8 @@ class Companion(QWidget):
         greet = {"morning": "Good morning", "afternoon": "Hi", "evening": "Good evening",
                  "night": "Hi"}[brain.part_of_day()]
         ep, private = self.ai()
-        if ep and private is True and (self.mem.all() or any(p["pid"] for p in self.in_view)):
+        noticed = (self.cfg.get("kanchan_notice_games") or self.cfg.get("kanchan_notice_shows")) and self.acts.recent()
+        if ep and private is True and (self.mem.all() or noticed or any(p["pid"] for p in self.in_view)):
             self.mood("think")
             self.in_thread("opener", self.run_ai, ep, self.messages(True, brain.opener_turn(name)))
             return
@@ -698,7 +768,7 @@ class Companion(QWidget):
             self.answer({"reply": f"Nice to meet you, {self.me['name']}!"}, keep=True)
 
     def open_memory(self):
-        Remembered(self, self.mem, self.me.get("name"), self.people).exec()
+        Remembered(self, self.mem, self.me.get("name"), self.people, self.acts, self.cfg).exec()
 
     # ---- seeing ----------------------------------------------------------------------------
     def eyes_blocked(self):
@@ -755,9 +825,15 @@ class Companion(QWidget):
             self.faces = vision.Faces()
         return True
 
+    def avatar_size(self, small):
+        """A smaller Kan-chan while the camera preview shows, so the window fits small screens."""
+        if isinstance(self.avatar, H.Avatar):
+            self.avatar.setFixedSize(*((168, 210) if small else (240, 300)))
+
     def stop_eyes(self):
         self.eye_timer.stop()
         self.eye_box.hide()
+        self.avatar_size(False)
         self.in_view, self.enrol = [], None
         if self.cam:
             if self.eye_busy:
@@ -972,6 +1048,7 @@ class Companion(QWidget):
             return
         if name == "eye-open":
             if kind == "ok" and value:
+                self.avatar_size(True)
                 self.eye_box.show()
                 self.eye_timer.start()
                 self.eye_tick()
@@ -1060,6 +1137,9 @@ def self_test():
     assert brain.parse('{"reply": "Hi", "forget": [1, 99]}', m.all())["forget"] == [1]
     assert not brain.keep_note("Votes for the Green party", "I vote Green")
     assert "impartial" in brain.personality("Kan-chan", "Sam")
+    acts = brain.Activity(m.db)
+    acts.add("game", "Test Game", 30)
+    assert "Test Game" in brain.activity_text(acts.recent(), "Sam")
     if vision.available():
         people = vision.People(m.db)
         a = vision.np.ones(128, dtype="float32") / vision.np.sqrt(128)

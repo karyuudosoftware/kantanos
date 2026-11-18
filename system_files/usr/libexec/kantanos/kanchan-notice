@@ -1,0 +1,151 @@
+#!/usr/bin/python3
+"""Kan-chan's noticing: which games you play and which shows and films you watch.
+
+Opt-in (Kan-chan → What I remember → "Notice …"), runs as the kantanos-kanchan-notice user
+service. Once a minute it looks at:
+  games  Steam and Lutris games that are running (the game's name only)
+  shows  what a video player or the web browser says is playing (MPRIS: the title only;
+         music is skipped)
+and adds the minutes to her notes database (the "activity" table, kept 30 days, every entry
+visible and deletable in "What I remember"). Nothing is sent anywhere.
+
+  kanchan-notice           keep noticing (the service)
+  kanchan-notice --once    one look, printed (for testing)
+"""
+import glob
+import json
+import os
+import re
+import sqlite3
+import sys
+import time
+
+sys.path.insert(0, "/usr/share/kantanos/kanchan")
+import brain  # noqa: E402
+
+CONFIG = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.join(brain.HOME, ".config")), "kantanos", "helper.json")
+STEAM = [os.path.join(brain.HOME, ".local/share/Steam"), os.path.join(brain.HOME, ".steam/steam"),
+         os.path.join(brain.HOME, ".var/app/com.valvesoftware.Steam/data/Steam")]
+TOOLS = re.compile(r"(?i)proton|steam linux runtime|steamworks|redistributable|soldier|sniper|scout")
+MUSIC_PLAYERS = re.compile(r"(?i)spotify|elisa|strawberry|rhythmbox|amarok|clementine|lollypop|audacious|"
+                           r"cantata|tauon|g4music|amberol|kasts|shortwave")
+VIDEO_PLAYERS = re.compile(r"(?i)vlc|mpv|haruna|celluloid|totem|dragon|smplayer|kodi|jellyfin|plex|stremio|"
+                           r"freetube|wakaru|firefox|chrom|brave|vivaldi|edge|opera|librewolf|zen")
+STEP = 60                       # seconds between looks
+
+
+def settings():
+    try:
+        with open(CONFIG, encoding="utf-8") as f:
+            cfg = json.load(f)
+    except (OSError, ValueError):
+        cfg = {}
+    return bool(cfg.get("kanchan_notice_games")), bool(cfg.get("kanchan_notice_shows"))
+
+
+# ---- games ----------------------------------------------------------------------------------
+
+def steam_names():
+    """Steam app id -> name, from the installed games' manifests in every library folder."""
+    libraries = set()
+    for root in STEAM:
+        vdf = os.path.join(root, "steamapps", "libraryfolders.vdf")
+        if os.path.exists(os.path.join(root, "steamapps")):
+            libraries.add(os.path.join(root, "steamapps"))
+        try:
+            for path in re.findall(r'"path"\s+"([^"]+)"', open(vdf, encoding="utf-8", errors="replace").read()):
+                libraries.add(os.path.join(path, "steamapps"))
+        except OSError:
+            pass
+    names = {}
+    for lib in libraries:
+        for acf in glob.glob(os.path.join(lib, "appmanifest_*.acf")):
+            try:
+                text = open(acf, encoding="utf-8", errors="replace").read()
+            except OSError:
+                continue
+            app = re.search(r'"appid"\s+"(\d+)"', text)
+            name = re.search(r'"name"\s+"([^"]+)"', text)
+            if app and name:
+                names[app.group(1)] = name.group(1)
+    return names
+
+
+def games_running():
+    import psutil
+    found, names = set(), None
+    for proc in psutil.process_iter(["cmdline", "name"]):
+        cmd = proc.info.get("cmdline") or []
+        line = " ".join(cmd)
+        m = re.search(r"SteamLaunch AppId=(\d+)", line)
+        if m:
+            names = names if names is not None else steam_names()
+            name = names.get(m.group(1))
+            if name and not TOOLS.search(name):
+                found.add(name)
+            continue
+        if cmd and cmd[0].startswith("lutris-wrapper: "):
+            found.add(cmd[0][len("lutris-wrapper: "):].strip())
+    return found
+
+
+# ---- shows and films --------------------------------------------------------------------------
+
+def shows_playing():
+    """Titles that video players (and browsers) say are playing right now."""
+    try:
+        import dbus
+        bus = dbus.SessionBus()
+    except Exception:  # noqa: BLE001 - no session bus, no players
+        return set()
+    found = set()
+    for name in bus.list_names():
+        if not name.startswith("org.mpris.MediaPlayer2."):
+            continue
+        player = name[len("org.mpris.MediaPlayer2."):]
+        if MUSIC_PLAYERS.search(player) or not VIDEO_PLAYERS.search(player):
+            continue
+        try:
+            props = dbus.Interface(bus.get_object(name, "/org/mpris/MediaPlayer2"), "org.freedesktop.DBus.Properties")
+            if str(props.Get("org.mpris.MediaPlayer2.Player", "PlaybackStatus")) != "Playing":
+                continue
+            meta = props.Get("org.mpris.MediaPlayer2.Player", "Metadata")
+        except Exception:  # noqa: BLE001 - a player that went away
+            continue
+        title = str(meta.get("xesam:title", "")).strip()
+        length = int(meta.get("mpris:length", 0) or 0) / 1e6
+        if not title or (0 < length < 240):
+            continue                     # no title, or a short clip / song
+        if meta.get("xesam:album") and meta.get("xesam:artist") and 0 < length < 900:
+            continue                     # looks like music
+        title = re.sub(r"\s+[-–|]\s+(YouTube|Netflix|Prime Video|Crunchyroll|Disney\+|TVer).*$", "", title)
+        found.add(title[:120])
+    return found
+
+
+def main():
+    once = "--once" in sys.argv
+    path = os.environ.get("KANTAN_KANCHAN_DB", brain.DB)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    acts = brain.Activity(sqlite3.connect(path))
+    acts.tidy()
+    while True:
+        games, shows = settings()
+        if not games and not shows and not once:
+            return                       # switched off: the service stops (Kan-chan turns it off too)
+        seen = []
+        if games or once:
+            seen += [("game", t) for t in sorted(games_running())]
+        if shows or once:
+            seen += [("show", t) for t in sorted(shows_playing())]
+        if once:
+            for kind, title in seen:
+                print(kind, title)
+            return
+        for kind, title in seen:
+            acts.add(kind, title, STEP // 60)
+        time.sleep(STEP)
+
+
+if __name__ == "__main__":
+    main()
