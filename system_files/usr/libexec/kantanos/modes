@@ -19,6 +19,8 @@ import re
 import shlex
 import subprocess
 import sys
+import threading
+import urllib.parse
 from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, QProcess, QTimer, QUrl, Signal, Slot
@@ -32,6 +34,34 @@ PREFS = USER_BASE / "modes.conf"
 LOOKS_DIR = Path(os.environ.get("KANTAN_LOOKS_DIR", "/usr/share/kantanos/looks"))
 LOOK_STATE = USER_BASE / "look"
 ICON_NAMES = ("desktop", "tv", "game", "retro", "web", "add", "restart")
+sys.path.insert(0, str(SYS_DIR))
+sys.path.insert(0, "/usr/share/kantanos/kanchan")
+HELPER = os.environ.get("KANTAN_HELPER_PATH", "/usr/libexec/kantanos/helper")
+
+
+def shortcut_ai():
+    """The shortcut maker and the AI it asks: (module, ask or None, note key, host).
+    Loaded only when "Add shortcut" opens, so the screen itself starts quickly."""
+    import importlib.machinery
+    import importlib.util
+    import shortcut_ai as sa
+    try:
+        import brain
+        loader = importlib.machinery.SourceFileLoader("kantanos_helper", HELPER)
+        helper = importlib.util.module_from_spec(importlib.util.spec_from_loader("kantanos_helper", loader))
+        loader.exec_module(helper)
+        ep = brain.endpoint(helper.load(), helper.local_model()[0])
+        if ep["kind"] == "ollama" and not (helper.ollama_up() and helper.local_ready(ep["model"])):
+            return sa, None, "aiNone", ""
+    except Exception as e:  # noqa: BLE001 - no AI: words are matched instead
+        print("shortcut AI:", e, file=sys.stderr)
+        return sa, None, "aiNone", ""
+
+    def ask(prompt):
+        return brain.complete(ep, [{"role": "user", "content": prompt}], temperature=0.2, timeout=90)
+    if ep["kind"] == "openai":
+        return sa, ask, "aiOnline", urllib.parse.urlparse(ep["url"]).hostname or "online"
+    return sa, ask, "aiLocal", ""
 
 
 def file_url(path):
@@ -78,7 +108,7 @@ STRINGS = {
     "en": {
         "title": "What would you like to do?",
         "add": "Add shortcut",
-        "addHint": "A website or live stream as its own tile",
+        "addHint": "An app, game or website as its own tile",
         "addTitle": "New shortcut",
         "name": "Name",
         "address": "Web address",
@@ -97,11 +127,24 @@ STRINGS = {
         "look": "Look",
         "rootWarning": "You are signed in as the system administrator (root). Some apps, like Steam, refuse to run like this, and a mistake here can damage the system. Create your own account and sign in with it instead.",
         "createAccount": "Create your account",
+        "smartTitle": "Tell me what it's for",
+        "smartHint": "e.g. watch Netflix, play Minecraft",
+        "make": "Make it",
+        "thinking": "Making your shortcut...",
+        "opens": "Opens %1",
+        "installsFirst": "Installs %1 from Flathub the first time you use it",
+        "noMatch": "I couldn't make a shortcut for that. Try other words, or type a web address below.",
+        "orAddress": "Or type a web address yourself",
+        "aiLocal": "The AI on this PC makes it. Nothing goes online.",
+        "aiOnline": "Uses the online AI (%1): only what you type and the names of your apps are sent.",
+        "aiNone": "No AI is set up, so your words are matched to your apps and well-known websites.",
+        "addIt": "Add it",
+        "tryAgain": "Try again",
     },
     "ja": {
         "title": "何をしますか？",
         "add": "ショートカットを追加",
-        "addHint": "ウェブサイトやライブ配信をタイルにします",
+        "addHint": "アプリ、ゲーム、ウェブサイトをタイルにします",
         "addTitle": "新しいショートカット",
         "name": "名前",
         "address": "ウェブアドレス",
@@ -120,6 +163,19 @@ STRINGS = {
         "look": "テーマ",
         "rootWarning": "システム管理者（root）としてサインインしています。Steam など一部のアプリはこの状態では動作せず、操作を誤るとシステムを壊すおそれがあります。自分のアカウントを作成し、そのアカウントでサインインしてください。",
         "createAccount": "アカウントを作成",
+        "smartTitle": "何に使うか教えてください",
+        "smartHint": "例：Netflix を見る、Minecraft で遊ぶ",
+        "make": "作成",
+        "thinking": "ショートカットを作成しています...",
+        "opens": "%1 を開きます",
+        "installsFirst": "初めて使うときに %1 を Flathub からインストールします",
+        "noMatch": "そのショートカットは作れませんでした。別の言葉で試すか、下にウェブアドレスを入力してください。",
+        "orAddress": "またはウェブアドレスを入力",
+        "aiLocal": "この PC の AI が作成します。何もオンラインに送られません。",
+        "aiOnline": "オンラインの AI（%1）を使います。入力した言葉とアプリ名だけが送られます。",
+        "aiNone": "AI が設定されていないため、アプリ名やよく知られたサイトと照合します。",
+        "addIt": "追加",
+        "tryAgain": "やり直す",
     },
 }
 
@@ -228,6 +284,10 @@ class Backend(QObject):
     failed = Signal(str)
     showAtLoginChanged = Signal()
     lookChanged = Signal()
+    aiNoteChanged = Signal()
+    suggested = Signal("QVariantMap")
+    _ready = Signal(object)
+    _made = Signal(object)
 
     def __init__(self, app):
         super().__init__()
@@ -238,6 +298,11 @@ class Backend(QObject):
         self._process = None
         self._look = read_look(current_look_id()) or {}
         self._looks = [look for look in (read_look(i) for i in look_ids()) if look]
+        self._ai = None           # (shortcut module, ask, note key, host) once "Add shortcut" opens
+        self._ai_note = ""
+        self._tile = None         # the suggested tile waiting for "Add it"
+        self._ready.connect(self._on_ready)
+        self._made.connect(self._on_made)
 
     @Property("QVariantList", notify=modesChanged)
     def modes(self):
@@ -351,6 +416,59 @@ class Backend(QObject):
             "Order=80\n",
             encoding="utf-8",
         )
+        self._modes = load_modes()
+        self.modesChanged.emit()
+        return True
+
+    # ---- shortcuts made from a few words (the AI only chooses; see shortcut_ai.py) ----------
+    @Property(str, notify=aiNoteChanged)
+    def aiNote(self):
+        return self._ai_note
+
+    @Slot()
+    def prepareAdd(self):
+        if self._ai is None:
+            threading.Thread(target=lambda: self._ready.emit(shortcut_ai()), daemon=True).start()
+
+    def _on_ready(self, ai):
+        self._ai = ai
+        self._ai_note = self.text[ai[2]].replace("%1", ai[3])
+        self.aiNoteChanged.emit()
+
+    @Slot(str)
+    def suggest(self, request):
+        def work():
+            try:
+                ai = self._ai or shortcut_ai()
+                self._made.emit((ai, ai[0].suggest(request, ai[0].Choices(LANG), ai[1])))
+            except Exception as e:  # noqa: BLE001 - shown as "couldn't make it"
+                print("shortcut:", e, file=sys.stderr)
+                self._made.emit((None, {"none": ""}))
+        self._tile = None
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_made(self, result):
+        ai, tile = result
+        if ai and self._ai is None:
+            self._on_ready(ai)
+        if "none" in tile:
+            self._tile = None
+            self.suggested.emit({"none": True, "why": tile["none"]})
+            return
+        self._tile = tile
+        what = (self.text["installsFirst"] if tile["kind"] == "install" else self.text["opens"]).replace("%1", tile["opens"])
+        self.suggested.emit({"none": False, "name": tile["name"], "comment": tile["comment"], "icon": tile["icon"],
+                             "iconFile": file_url(tile["iconFile"]) if tile["iconFile"] else "", "what": what})
+
+    @Slot(str, result=bool)
+    def addSuggested(self, name):
+        if not self._tile or not self._ai:
+            return False
+        tile = dict(self._tile)
+        if name.strip():
+            tile["name"] = name.strip()
+        self._ai[0].write_mode(str(USER_DIR), tile)
+        self._tile = None
         self._modes = load_modes()
         self.modesChanged.emit()
         return True

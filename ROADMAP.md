@@ -217,7 +217,15 @@ Steps:
       first (laws, elections, examples), never which side she leans to. Checked with the
       fairness test (plus a "several parts of the world, each fairly" check) before shipping.
 
-- [ ] AI-made shortcuts on the "What would you like to do?" screen.
+- [x] AI-made shortcuts on the "What would you like to do?" screen: "Add shortcut" → "Tell me
+      what it's for" ("watch Netflix", "play Portal", "homework in Google Docs", Japanese too).
+      The AI only *chooses* (an installed app, a Steam game, one of ~30 well-known sites, one of
+      ~27 family-safe Flathub apps installed on first use, or another site's official https
+      address); the command is always built by `shortcut_ai.py`, never written by the AI. A
+      second AI check rejects picks that don't really fit (no calculator for "Roblox"), apps keep
+      their real name, and the tile is shown (icon, name, "Opens …") before "Add it". Works
+      without an AI by matching words; with an online AI it says so first (only the words typed
+      and app names are sent). Typing a web address yourself still works.
 - [ ] Accessibility: screen reader plus an AI voice helper that reads and handles email and
       the day's agenda, always asking before it sends or deletes anything.
 

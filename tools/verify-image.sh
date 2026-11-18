@@ -54,6 +54,7 @@ check "mode chooser screen loads"          "HOME=/tmp/fmtest QT_QPA_PLATFORM=off
 check "mode chooser starts at login"       "grep -q -- --login /etc/xdg/autostart/kantanos-modes.desktop"
 check "mode chooser is on the dock"        "grep -q kantanos-modes.desktop /usr/share/plasma/look-and-feel/org.kantanos.desktop/contents/layouts/org.kde.plasma.desktop-layout.js && test -f /usr/share/applications/kantanos-modes.desktop"
 check "mode chooser window rule present"   "grep -q wmclass=kantanos-modes /etc/xdg/kwinrulesrc"
+check "AI shortcuts: maker works without an AI" "python3 -m py_compile /usr/share/kantanos/modes/shortcut_ai.py && HOME=/tmp/satest python3 /usr/share/kantanos/modes/shortcut_ai.py watch netflix | grep -q netflix.com && grep -q addSuggested /usr/share/kantanos/modes/ui/Main.qml"
 check "starter apps wait and run at idle priority" "grep -q IOSchedulingClass=idle /usr/lib/systemd/system/kantanos-flatpak-setup.service && grep -q sleep.180 /usr/lib/systemd/system/kantanos-flatpak-setup.service"
 check "login display server has a long start limit" "grep -q TimeoutStartSec=300 /usr/lib/systemd/user/plasma-login-kwin_wayland.service.d/10-kantanos.conf && test -f /usr/lib/systemd/user/plasma-login-kwin_wayland.service"
 check "bluetooth boot argument is built in" "grep -q bluetooth.disable_ertm=1 /usr/lib/bootc/kargs.d/10-kantanos.toml"

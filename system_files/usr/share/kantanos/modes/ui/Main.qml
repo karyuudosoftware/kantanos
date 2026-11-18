@@ -35,12 +35,18 @@ Window {
     property int current: 0
     property string message: ""
     property bool adding: false
+    property bool making: false          // the AI is choosing
+    property var suggestion: null        // the tile it made: shown before it's added
     readonly property bool blocked: backend.busy !== "" || message !== "" || adding
 
     function clampCurrent() { if (current >= tileCount) current = tileCount - 1; if (current < 0) current = 0 }
     function open(index) {
         if (blocked) return
-        if (index === backend.modes.length) { adding = true; nameField.text = ""; addressField.text = ""; nameField.forceActiveFocus() }
+        if (index === backend.modes.length) {
+            adding = true; suggestion = null; making = false
+            askField.text = ""; nameField.text = ""; addressField.text = ""
+            backend.prepareAdd(); askField.forceActiveFocus()
+        }
         else backend.activate(index)
     }
     function iconFor(mode) { return mode.iconFile !== "" ? mode.iconFile : look.icons + "/" + mode.icon + ".svg" }
@@ -49,6 +55,12 @@ Window {
         target: backend
         function onFailed(text) { root.message = text }
         function onModesChanged() { root.clampCurrent() }
+        function onSuggested(s) {
+            if (!root.adding) return
+            root.making = false
+            root.suggestion = s
+            if (!s.none) { previewName.text = s.name; previewName.forceActiveFocus() }
+        }
     }
 
     Image {
@@ -180,6 +192,7 @@ Window {
                                 source: tile.isAdd ? look.icons + "/add.svg" : root.iconFor(tile.mode)
                                 width: 96 * root.u; height: 96 * root.u
                                 sourceSize.width: 192; sourceSize.height: 192
+                                fillMode: Image.PreserveAspectFit
                                 opacity: tile.isAdd ? 0.7 : 1.0
                             }
                             Text {
@@ -357,6 +370,68 @@ Window {
 
                 // New shortcut
                 Text { visible: root.adding; text: backend.text.addTitle; color: root.ink; font.pixelSize: 28 * root.u; font.weight: Font.DemiBold }
+
+                // Made from a few words: the AI picks an app, game or site; the tile is shown before it's added
+                Text { visible: root.adding; text: backend.text.smartTitle; color: root.ink; opacity: 0.8; font.pixelSize: 17 * root.u }
+                Row {
+                    visible: root.adding
+                    width: parent.width
+                    spacing: 12 * root.u
+                    TextField { id: askField; width: parent.width - makeButton.width - parent.spacing; font.pixelSize: 20 * root.u
+                                placeholderText: backend.text.smartHint; enabled: !root.making
+                                Keys.onReturnPressed: makeButton.clicked()
+                                Keys.onEscapePressed: cancelButton.clicked() }
+                    Button { id: makeButton; text: backend.text.make; font.pixelSize: 18 * root.u
+                             enabled: askField.text.trim() !== "" && !root.making
+                             onClicked: { root.making = true; root.suggestion = null; backend.suggest(askField.text) } }
+                }
+                Text { visible: root.adding && backend.aiNote !== ""; width: parent.width; text: backend.aiNote; color: root.ink
+                       opacity: 0.65; font.pixelSize: 14 * root.u; wrapMode: Text.WordWrap }
+                Row {
+                    visible: root.adding && root.making
+                    spacing: 12 * root.u
+                    BusyIndicator { running: parent.visible; width: 36 * root.u; height: 36 * root.u }
+                    Text { anchors.verticalCenter: parent.verticalCenter; text: backend.text.thinking; color: root.ink; font.pixelSize: 17 * root.u }
+                }
+                Rectangle {
+                    id: preview
+                    objectName: "preview"
+                    visible: root.adding && root.suggestion !== null && !root.suggestion.none
+                    width: parent.width
+                    height: previewRow.implicitHeight + 28 * root.u
+                    radius: 18 * root.u
+                    color: look.TILE_SELECTED
+                    border.color: look.ACCENT_HEX; border.width: 2 * root.u
+                    Row {
+                        id: previewRow
+                        anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; margins: 14 * root.u }
+                        spacing: 16 * root.u
+                        Image {
+                            anchors.verticalCenter: parent.verticalCenter
+                            source: !preview.visible ? "" : (root.suggestion.iconFile !== "" ? root.suggestion.iconFile
+                                                                                             : look.icons + "/" + root.suggestion.icon + ".svg")
+                            width: 72 * root.u; height: 72 * root.u
+                            sourceSize.width: 144; sourceSize.height: 144
+                            fillMode: Image.PreserveAspectFit
+                        }
+                        Column {
+                            width: parent.width - 88 * root.u
+                            spacing: 6 * root.u
+                            TextField { id: previewName; width: parent.width; font.pixelSize: 20 * root.u; font.weight: Font.DemiBold
+                                        Keys.onReturnPressed: addItButton.clicked()
+                                        Keys.onEscapePressed: cancelButton.clicked() }
+                            Text { width: parent.width; text: preview.visible ? root.suggestion.comment : ""; color: root.ink
+                                   opacity: 0.8; font.pixelSize: 15 * root.u; wrapMode: Text.WordWrap }
+                            Text { width: parent.width; text: preview.visible ? root.suggestion.what : ""; color: root.ink
+                                   font.pixelSize: 15 * root.u; font.weight: Font.DemiBold; wrapMode: Text.WordWrap }
+                        }
+                    }
+                }
+                Text { visible: root.adding && root.suggestion !== null && root.suggestion.none; width: parent.width
+                       text: backend.text.noMatch; color: root.ink; font.pixelSize: 17 * root.u; wrapMode: Text.WordWrap }
+
+                Text { visible: root.adding; text: backend.text.orAddress; color: root.ink; opacity: 0.8; font.pixelSize: 17 * root.u
+                       topPadding: 10 * root.u }
                 Text { visible: root.adding; text: backend.text.name; color: root.ink; opacity: 0.8; font.pixelSize: 17 * root.u }
                 TextField { id: nameField; visible: root.adding; width: parent.width; font.pixelSize: 20 * root.u
                             Keys.onReturnPressed: addressField.forceActiveFocus()
@@ -371,8 +446,12 @@ Window {
                     anchors.right: parent.right
                     spacing: 14 * root.u
                     Button { id: cancelButton; text: backend.text.cancel; font.pixelSize: 18 * root.u
-                             onClicked: { root.adding = false; keys.forceActiveFocus() } }
+                             onClicked: { root.adding = false; root.making = false; root.suggestion = null; keys.forceActiveFocus() } }
+                    Button { id: addItButton; text: backend.text.addIt; font.pixelSize: 18 * root.u
+                             visible: preview.visible; highlighted: true
+                             onClicked: { if (backend.addSuggested(previewName.text)) { root.adding = false; root.suggestion = null; keys.forceActiveFocus() } } }
                     Button { id: saveButton; text: backend.text.save; font.pixelSize: 18 * root.u
+                             visible: !preview.visible
                              enabled: nameField.text.trim() !== "" && addressField.text.trim() !== ""
                              onClicked: {
                                  if (backend.addShortcut(nameField.text, addressField.text)) { root.adding = false; keys.forceActiveFocus() }
