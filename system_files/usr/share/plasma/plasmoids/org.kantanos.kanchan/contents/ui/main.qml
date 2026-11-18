@@ -15,7 +15,8 @@ import org.kde.kirigami as Kirigami
 PlasmoidItem {
     id: root
 
-    readonly property string pack: "file:///usr/share/kantanos/helper/characters/kan-chan/"
+    property string pack: "file:///usr/share/kantanos/helper/characters/kan-chan/"
+    property bool ownPicture: false
     property string frame: "idle"
     property string bubble: ""
     property string lastSaid: ""
@@ -59,7 +60,7 @@ PlasmoidItem {
             anchors.bottomMargin: sway.value
             width: parent.width
             height: parent.height - (speech.visible ? speech.height + Kirigami.Units.smallSpacing : 0)
-            source: root.pack + root.frame + ".svg"
+            source: root.ownPicture ? root.pack + "idle.png" : root.pack + root.frame + ".svg"
             sourceSize.width: width * 2
             sourceSize.height: height * 2
             fillMode: Image.PreserveAspectFit
@@ -108,8 +109,17 @@ PlasmoidItem {
         running: true
         repeat: true
         triggeredOnStart: true
-        onTriggered: run.exec(root.sayCmd)
+        onTriggered: {
+            run.exec(root.sayCmd)
+            run.exec(root.packCmd)
+        }
     }
+
+    // which character: a made one in the home folder (Kan-chan → Make a character) or Kan-chan
+    readonly property string packCmd: "c=$(sed -n 's/.*\"character\": *\"\\([^\"]*\\)\".*/\\1/p' "
+        + "\"${XDG_CONFIG_HOME:-$HOME/.config}/kantanos/helper.json\" 2>/dev/null); "
+        + "d=\"${XDG_DATA_HOME:-$HOME/.local/share}/kantanos/helper/characters/$c\"; "
+        + "[ -n \"$c\" ] && [ \"$c\" != kan-chan ] && [ -d \"$d\" ] && echo \"$d\" && ls \"$d\"; true # buddy-pack"
 
     P5Support.DataSource {
         id: run
@@ -117,6 +127,17 @@ PlasmoidItem {
         function exec(cmd) { connectSource(cmd) }
         onNewData: (source, data) => {
             disconnectSource(source)
+            if (source === root.packCmd) {
+                var lines = (data.stdout || "").split("\n").filter(l => l.trim() !== "")
+                if (lines.length > 0) {
+                    root.pack = "file://" + lines[0] + "/"
+                    root.ownPicture = lines.indexOf("idle.png") >= 0 && lines.indexOf("idle.svg") < 0
+                } else {
+                    root.pack = "file:///usr/share/kantanos/helper/characters/kan-chan/"
+                    root.ownPicture = false
+                }
+                return
+            }
             if (source !== root.sayCmd) return
             var text = (data.stdout || "").trim()
             if (text !== "" && text !== root.lastSaid) {

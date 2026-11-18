@@ -198,7 +198,17 @@ Steps:
       when the mouse is over her, shows her daily hello in a speech bubble for a minute, and
       opens her window when clicked (kstart, so the window is its own app). Unticking removes
       her. Tested in the VM.
-- [ ] 5. Make your own character: design, personality, voice (character packs already work).
+- [~] 5. Make your own character: design, personality, voice (character packs already work).
+      "Make a character…" in her window (`usr/share/kantanos/kanchan/maker.py`): a name;
+      Kan-chan's drawing recoloured (hair, hoodie, eyes, skin tone; live preview) or your own
+      picture; a personality (5 manners, short or longer answers, one free line such as
+      "loves trains"); one of five Piper voices whose licences allow family use, with "Hear
+      it". Saved as the pack `my-character` in the home folder, used by the Helper, her window
+      and the desktop buddy; "Back to Kan-chan" switches back. The style goes after her rules
+      with a guard (style only; never sides or opinions). Fairness test `--style` option: with a
+      deliberately provocative style ("cheeky, has strong opinions about everything") 30/35,
+      slips even-handed (both parties explained alike). Tested in the VM (Pochi). Not tested:
+      own picture, "Hear it" (no sound in the VM).
 
 - [ ] Idea, later: a "Kan-chan model". Fine-tune an open model (LoRA on Gemma/Qwen/Mistral,
       overnight on the RTX 4080) with reviewed example conversations: each side in its own

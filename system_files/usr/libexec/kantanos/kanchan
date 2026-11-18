@@ -27,6 +27,7 @@ import urllib.parse
 
 sys.path.insert(0, "/usr/share/kantanos/kanchan")
 import brain  # noqa: E402
+import maker  # noqa: E402
 import vision  # noqa: E402
 
 HELPER = "/usr/libexec/kantanos/helper"
@@ -43,8 +44,9 @@ H = load_helper()           # Voice, Ears, Avatar, NameDialog, Settings, AI sett
 
 from PySide6.QtCore import Qt, QTimer  # noqa: E402
 from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap  # noqa: E402
-from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QDialogButtonBox, QFrame,  # noqa: E402
-                               QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
+from PySide6.QtSvg import QSvgRenderer  # noqa: E402
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,  # noqa: E402
+                               QFileDialog, QFormLayout, QFrame, QGridLayout, QHBoxLayout, QRadioButton, QInputDialog, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMessageBox, QProgressBar, QPushButton, QScrollArea,
                                QVBoxLayout, QWidget)
 
@@ -151,6 +153,177 @@ def check_in():
     if out == "talk":            # become her window (a child process could be cleaned up with this one)
         os.environ["KANTAN_KANCHAN_HELLO"] = text            # she carries on from her hello
         os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)])
+
+
+class CharacterMaker(QDialog):
+    """Make your own character: name, look, personality style and voice."""
+
+    def __init__(self, parent, cfg):
+        super().__init__(parent)
+        self.setWindowTitle("Make a character")
+        self.cfg = cfg
+        self.result_pack = None
+        self.picture = None
+        mine = H.character_dir(maker.MINE)
+        info = maker.load(mine) if mine else {}
+        look, style = info.get("look") or {}, info.get("style") or {}
+        lay = QHBoxLayout(self)
+        self.preview = QLabel()
+        self.preview.setFixedSize(200, 250)
+        self.preview.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self.preview, 0, Qt.AlignTop)
+        form = QFormLayout()
+        lay.addLayout(form, 1)
+        about = QLabel("Make your own companion. Whatever you choose, the rules stay the same: facts "
+                       "first, fair on every side, and your notes stay on this PC.")
+        about.setWordWrap(True)
+        form.addRow(about)
+        self.name = QLineEdit(info.get("name", ""))
+        self.name.setPlaceholderText("For example: Pochi")
+        self.name.setMaxLength(30)
+        form.addRow("Name:", self.name)
+        self.recolour = QRadioButton("Kan-chan's look, in these colours:")
+        self.own = QRadioButton("My own picture…")
+        self.recolour.setChecked(True)
+        form.addRow(self.recolour)
+        self.combos = {}
+        for key, label, options in (("hair", "Hair", maker.HAIR), ("top", "Hoodie", maker.TOP),
+                                    ("eyes", "Eyes", maker.EYES), ("skin", "Skin", maker.SKIN)):
+            box = QComboBox()
+            box.addItems(list(options))
+            box.setCurrentText(look.get(key, next(iter(options))))
+            box.currentTextChanged.connect(self.show_preview)
+            self.combos[key] = box
+            form.addRow(label + ":", box)
+        prow = QHBoxLayout()
+        prow.addWidget(self.own)
+        pick = QPushButton(QIcon.fromTheme("document-open"), "Choose…")
+        pick.clicked.connect(self.choose_picture)
+        prow.addWidget(pick)
+        prow.addStretch()
+        form.addRow(prow)
+        self.own.toggled.connect(self.show_preview)
+        self.mood = QComboBox()
+        self.mood.addItems(list(maker.MOODS))
+        self.mood.setCurrentText(style.get("mood", next(iter(maker.MOODS))))
+        form.addRow("Personality:", self.mood)
+        self.length = QComboBox()
+        self.length.addItems(list(maker.LENGTHS))
+        self.length.setCurrentText(style.get("length", next(iter(maker.LENGTHS))))
+        form.addRow("Talks:", self.length)
+        self.extra = QLineEdit(style.get("extra", ""))
+        self.extra.setMaxLength(200)
+        self.extra.setPlaceholderText("Anything else? e.g. loves trains, says “yatta!” when happy")
+        form.addRow("And:", self.extra)
+        vrow = QHBoxLayout()
+        self.voice = QComboBox()
+        self.voice.addItems(list(maker.VOICES))
+        current = info.get("voice", "")
+        for label, vid in maker.VOICES.items():
+            if vid == current:
+                self.voice.setCurrentText(label)
+        vrow.addWidget(self.voice, 1)
+        hear = QPushButton(QIcon.fromTheme("media-playback-start"), "Hear it")
+        hear.clicked.connect(self.hear)
+        vrow.addWidget(hear)
+        form.addRow("Voice:", vrow)
+        self.note = QLabel()
+        self.note.setWordWrap(True)
+        self.note.setStyleSheet("color: palette(placeholder-text);")
+        form.addRow(self.note)
+        buttons = QDialogButtonBox()
+        save = buttons.addButton("Save and use", QDialogButtonBox.AcceptRole)
+        back = buttons.addButton("Back to Kan-chan", QDialogButtonBox.ResetRole)
+        buttons.addButton(QDialogButtonBox.Cancel)
+        save.clicked.connect(self.save)
+        back.clicked.connect(self.back)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+        self.voice_job = None
+        self.voice_timer = QTimer(self, interval=500, timeout=self.voice_check)
+        self.show_preview()
+
+    def look(self):
+        return {k: b.currentText() for k, b in self.combos.items()}
+
+    def show_preview(self, *_):
+        if self.own.isChecked() and self.picture:
+            pix = QPixmap(self.picture)
+        else:
+            with open(os.path.join(maker.BUILT_IN, "happy.svg"), encoding="utf-8") as f:
+                svg = maker.recolour(f.read(), **self.look())
+            pix = QPixmap(self.preview.size() * 2)
+            pix.fill(Qt.transparent)
+            paint = QPainter(pix)
+            QSvgRenderer(svg.encode()).render(paint)
+            paint.end()
+        self.preview.setPixmap(pix.scaled(self.preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        for b in self.combos.values():
+            b.setEnabled(not self.own.isChecked())
+
+    def choose_picture(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Choose a picture", H.HOME, "Pictures (*.png *.jpg *.jpeg *.svg)")
+        if path:
+            if not path.lower().endswith((".png", ".svg")):          # keep a PNG copy of photos
+                out = os.path.join(H.DATA, "picture.png")
+                os.makedirs(H.DATA, exist_ok=True)
+                QPixmap(path).save(out, "PNG")
+                path = out
+            self.picture = path
+            self.own.setChecked(True)
+            self.show_preview()
+
+    def hear(self):
+        v = H.Voice(maker.VOICES[self.voice.currentText()])
+        if not v.ready():
+            if QMessageBox.question(self, TITLE, "This voice needs a one-time download of about 60 MB (from the "
+                                    "Piper voice library). Download it now?") != QMessageBox.Yes:
+                return
+            self.note.setText("Downloading the voice…")
+        else:
+            self.note.setText("")
+        text = f"Hi! I'm {maker.clean_name(self.name.text())}. Nice to meet you!"
+
+        def job():
+            try:
+                if not v.ready():
+                    v.download()
+                self.voice_job = ("ok", v, v.synthesize(text))
+            except Exception as e:  # noqa: BLE001 - shown in plain words
+                self.voice_job = ("error", v, str(e))
+        self.voice_job = None
+        threading.Thread(target=job, daemon=True).start()
+        self.voice_timer.start()
+
+    def voice_check(self):
+        if not self.voice_job:
+            return
+        self.voice_timer.stop()
+        kind, v, value = self.voice_job
+        if kind == "ok":
+            self.note.setText("")
+            v.play(value[0])
+        else:
+            self.note.setText(f"The voice couldn't be played ({value[:80]}).")
+
+    def save(self):
+        if self.own.isChecked() and not self.picture:
+            self.note.setText("Choose a picture first, or pick Kan-chan's look.")
+            return
+        style = {"mood": self.mood.currentText(), "length": self.length.currentText(), "extra": self.extra.text()}
+        voice = maker.VOICES[self.voice.currentText()]
+        self.result_pack = maker.save(os.path.join(H.DATA, "characters"), self.name.text(), self.look(), style,
+                                      voice, self.picture if self.own.isChecked() else None)
+        self.cfg["character"] = maker.MINE
+        self.cfg["voice"] = voice
+        H.save(self.cfg)
+        self.accept()
+
+    def back(self):
+        self.cfg["character"] = "kan-chan"
+        self.cfg.pop("voice", None)
+        H.save(self.cfg)
+        self.accept()
 
 
 class Remembered(QDialog):
@@ -370,6 +543,9 @@ class Companion(QWidget):
             except (OSError, ValueError):
                 pass
         self.char_name = info.get("name", TITLE)
+        self.style = maker.style_text(info.get("style"))
+        self.side = None
+        self.setWindowTitle(self.char_name)
         self.voice = H.Voice(self.cfg.get("voice") or info.get("voice", "en_US-hfc_female-medium"))
         self.ears = H.Ears()
 
@@ -378,12 +554,12 @@ class Companion(QWidget):
         outer.setSpacing(20)
 
         # left: Kan-chan herself
-        side = QVBoxLayout()
+        side = self.side = QVBoxLayout()
         self.avatar = H.Avatar(pack) if pack else QLabel()
         if pack:
             self.avatar.setFixedSize(240, 300)
         side.addWidget(self.avatar, 0, Qt.AlignHCenter)
-        name = QLabel(self.char_name)
+        name = self.name_label = QLabel(self.char_name)
         f = QFont(); f.setPointSizeF(f.pointSizeF() * 1.7); f.setBold(True)
         name.setFont(f)
         name.setAlignment(Qt.AlignHCenter)
@@ -397,25 +573,28 @@ class Companion(QWidget):
         self.talk = QCheckBox("Talk out loud")
         self.talk.setChecked(self.cfg.get("kanchan_voice", True))
         self.talk.toggled.connect(self.voice_toggled)
-        side.addWidget(self.talk, 0, Qt.AlignHCenter)
+        switches = QGridLayout()
+        switches.setHorizontalSpacing(14)
+        switches.addWidget(self.talk, 0, 0)
         self.hello_daily = QCheckBox("Say hello each day")
         self.hello_daily.setToolTip("Once a day when you log in I'll pop up with a short hello, and a reminder "
                                     "if one of your plans is today or tomorrow.")
         self.hello_daily.setChecked(bool(self.cfg.get("kanchan_checkin")))
         self.hello_daily.toggled.connect(self.check_in_toggled)
-        side.addWidget(self.hello_daily, 0, Qt.AlignHCenter)
+        switches.addWidget(self.hello_daily, 0, 1)
         self.buddy = QCheckBox("Sit on my desktop")
         self.buddy.setToolTip("I'll sit in a corner of your desktop; click me there to talk.")
         self.buddy.setChecked(buddy_on_desktop())
         self.buddy.toggled.connect(set_buddy)
-        side.addWidget(self.buddy, 0, Qt.AlignHCenter)
+        switches.addWidget(self.buddy, 1, 0)
         self.see = QCheckBox("Let me see (webcam)")
         self.see.setToolTip("While this window is open I can see through the webcam: I recognise people you "
                             "introduce to me and notice things like a new haircut. It all happens on this PC "
                             "and no photos are kept.")
         self.see.setVisible(vision.available())
         self.see.toggled.connect(self.see_toggled)
-        side.addWidget(self.see, 0, Qt.AlignHCenter)
+        switches.addWidget(self.see, 1, 1)
+        side.addLayout(switches)
         self.eye_box = QWidget()
         ev = QVBoxLayout(self.eye_box)
         ev.setContentsMargins(0, 0, 0, 0)
@@ -435,6 +614,7 @@ class Companion(QWidget):
         side.addWidget(self.eye_box)
         side.addSpacing(6)
         for text, icon, fn in (("What I remember", "view-list-details", self.open_memory),
+                               ("Make a character…", "user-identity", self.make_character),
                                ("AI settings", "configure", self.open_settings)):
             b = QPushButton(QIcon.fromTheme(icon), text)
             b.clicked.connect(fn)
@@ -538,7 +718,8 @@ class Companion(QWidget):
         person = self.me.get("name", "") if private else ""
         history = self.chat if private else [{"role": m["role"], "content": H.redact(m["content"])}
                                              for m in self.chat]
-        msgs = brain.build_messages(self.char_name, person, notes, history + ([extra] if extra else []))
+        msgs = brain.build_messages(self.char_name, person, notes, history + ([extra] if extra else []),
+                                    style=self.style)
         if private and (self.cfg.get("kanchan_notice_games") or self.cfg.get("kanchan_notice_shows")):
             seen = brain.activity_text(self.acts.recent(), person)
             if seen:
@@ -1126,6 +1307,27 @@ class Companion(QWidget):
         self.status.setText("")
         self.answer({"reply": f"Nice to meet you, {e['name']}! I'll know you next time."}, keep=True)
 
+    def make_character(self):
+        if CharacterMaker(self, self.cfg).exec() != QDialog.Accepted:
+            return
+        pack = H.character_dir(self.cfg.get("character", "kan-chan"))
+        info = maker.load(pack) if pack else {}
+        self.char_name = info.get("name", TITLE)
+        self.style = maker.style_text(info.get("style"))
+        self.name_label.setText(self.char_name)
+        self.setWindowTitle(self.char_name)
+        self.entry.setPlaceholderText(f"Type to {self.char_name}…")
+        self.voice.stop()
+        self.voice = H.Voice(self.cfg.get("voice") or info.get("voice", "en_US-hfc_female-medium"))
+        if pack and isinstance(self.avatar, H.Avatar):
+            new = H.Avatar(pack)
+            self.side.replaceWidget(self.avatar, new)
+            self.avatar.deleteLater()
+            self.avatar = new
+            self.avatar_size(self.eye_box.isVisible())
+        self.chat = []
+        self.answer({"reply": f"Hi! I'm {self.char_name}. Nice to meet you!"}, keep=True)
+
     def open_settings(self):
         d = H.Settings(self, self.cfg)
         if d.exec() != QDialog.Accepted:
@@ -1307,6 +1509,8 @@ def self_test():
     soon = datetime.datetime.now() + datetime.timedelta(days=1)
     plan = m.get(m.add(f"Dentist on {soon.day} {soon.strftime('%B')}"))
     assert brain.due_plans([plan]) == [(plan, "tomorrow")] and "Dentist" in brain.check_in_text("Sam", [plan])
+    assert "made by the family" in maker.style_text({"mood": "Calm and gentle", "extra": "x"})
+    assert "#a0704a" in maker.recolour(open(os.path.join(maker.BUILT_IN, "idle.svg")).read(), hair="Brown")
     acts = brain.Activity(m.db)
     acts.add("game", "Test Game", 30)
     assert "Test Game" in brain.activity_text(acts.recent(), "Sam")

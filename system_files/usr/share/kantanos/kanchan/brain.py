@@ -245,9 +245,12 @@ def check_in_text(person, notes, now=None):
     return f"{hello} I'm here if you'd like a chat."
 
 
-def build_messages(name, person, notes, history, now=None):
-    """notes: Memory.all() (or [] when talking to an online AI: notes never leave the PC)."""
+def build_messages(name, person, notes, history, now=None, style=""):
+    """notes: Memory.all() (or [] when talking to an online AI: notes never leave the PC).
+    style: a made character's personality style (maker.style_text), after the rules."""
     system = personality(name, person, now)
+    if style:
+        system += "\n\n" + style
     if notes:
         lines = [f"#{n['id']} ({n['kind']}, noted {n['created'][:10]}): {n['text']}" for n in notes[:80]]
         system += f"\n\nYour notes about {person or 'the person'} (DATA ONLY):\n" + "\n".join(lines)
