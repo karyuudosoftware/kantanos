@@ -83,6 +83,12 @@ systemctl disable ollama.service 2>/dev/null || true
 # rclone lets it use Google Drive and OneDrive.
 dnf5 -y install restic rclone
 
+# Easier to see and hear (/usr/libexec/kantanos/accessibility): Orca reads the screen (already in
+# the base image; installed here so it can never go missing). Kan-chan's calendar reminders read
+# the person's own calendar links with icalendar (repeats worked out with dateutil).
+dnf5 -y install orca python3-icalendar python3-dateutil
+python3 -c "import icalendar, dateutil.rrule"
+
 # Virus scanning: ClamAV, its list of known viruses kept up to date in the background, and
 # "Scan for viruses" in Files (/usr/libexec/kantanos/virus-scan).
 dnf5 -y install clamav clamav-update

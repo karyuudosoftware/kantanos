@@ -13,7 +13,7 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
 OFFICE = [
     ("org.libreoffice.LibreOffice", "LibreOffice", "Word processor, spreadsheets and presentations. Opens and saves Microsoft Office files."),
     ("com.github.dail8859.NotepadNext", "NotepadNext", "A Notepad++ style text editor that runs natively."),
-    ("org.mozilla.Thunderbird", "Thunderbird", "Email and calendar."),
+    ("org.mozilla.thunderbird", "Thunderbird", "Email and calendar."),
 ]
 CREATIVE = [
     ("org.kde.krita", "Krita", "Digital painting and drawing."),
@@ -149,6 +149,8 @@ doc += screen("Tools", "Disk space and system helpers", "".join([
            "nohup setsid /usr/libexec/kantanos/helper >&/dev/null"),
     action("kanchan", "Meet Kan-chan, your PC companion", "Chat with Kan-chan by talking or typing. She remembers what you tell her (you can see, change or delete it all in \"What I remember\"), suggests what to cook and keeps you company. Everything stays on this PC. Adds her to the app menu.",
            "nohup setsid /usr/libexec/kantanos/kanchan --enable >&/dev/null"),
+    action("access", "Make the PC easier to see and hear", "Screen reader (reads the screen out loud), everything bigger, bigger text and mouse pointer, a magnifier. Kan-chan can also read your email out loud and remind you about appointments.",
+           "nohup setsid /usr/libexec/kantanos/accessibility >&/dev/null"),
     action("claudecode", "Install Claude Code", "Claude's coding assistant for the terminal, from Anthropic's official installer. Needs a Claude account. It goes into your home folder, so updates to KantanOS don't affect it.",
            f"curl -fsSL https://claude.ai/install.sh | bash; {PAUSE}"),
     action("backups", "Back up your files (recommended)", "Set it up once: choose a USB drive, your NAS, Google Drive or OneDrive, and your documents, photos, music and videos are backed up every 30 minutes, locked with your own backup key. Getting files back is in the same place.",

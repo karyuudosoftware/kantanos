@@ -108,14 +108,14 @@ screens:
         title: "Thunderbird"
         description: "Email and calendar."
         default: false
-        status_script: "kantan-app status org.mozilla.Thunderbird"
+        status_script: "kantan-app status org.mozilla.thunderbird"
         options:
           - id: "uninstall"
             label: "Install Thunderbird"
-            script: "kantan-app install org.mozilla.Thunderbird"
+            script: "kantan-app install org.mozilla.thunderbird"
           - id: "remove-app"
             label: "Remove Thunderbird"
-            script: "kantan-app uninstall org.mozilla.Thunderbird"
+            script: "kantan-app uninstall org.mozilla.thunderbird"
   - title: "Creative"
     description: "Photos, drawing, video and audio"
     actions:
@@ -400,6 +400,11 @@ screens:
         description: "Chat with Kan-chan by talking or typing. She remembers what you tell her (you can see, change or delete it all in \"What I remember\"), suggests what to cook and keeps you company. Everything stays on this PC. Adds her to the app menu."
         default: false
         script: "nohup setsid /usr/libexec/kantanos/kanchan --enable >&/dev/null"
+      - id: "access"
+        title: "Make the PC easier to see and hear"
+        description: "Screen reader (reads the screen out loud), everything bigger, bigger text and mouse pointer, a magnifier. Kan-chan can also read your email out loud and remind you about appointments."
+        default: false
+        script: "nohup setsid /usr/libexec/kantanos/accessibility >&/dev/null"
       - id: "claudecode"
         title: "Install Claude Code"
         description: "Claude's coding assistant for the terminal, from Anthropic's official installer. Needs a Claude account. It goes into your home folder, so updates to KantanOS don't affect it."

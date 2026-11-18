@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Talk to Kan-chan
+Comment=Kan-chan comes forward and listens; press again when you've finished talking
+Exec=/usr/libexec/kantanos/kanchan --listen
+Icon=kantanos-kanchan
+NoDisplay=true
+X-KDE-Shortcuts=Meta+K

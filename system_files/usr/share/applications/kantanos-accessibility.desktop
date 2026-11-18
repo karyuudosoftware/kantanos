@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Easier to See and Hear
+Comment=Screen reader, bigger text and pointer, magnifier
+Keywords=accessibility;screen reader;orca;blind;vision;large text;zoom;magnifier;
+Exec=/usr/libexec/kantanos/accessibility
+Icon=preferences-desktop-accessibility
+Categories=Settings;Accessibility;

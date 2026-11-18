@@ -75,7 +75,7 @@ CATALOGUE = {
     "us.zoom.Zoom": ("Zoom", "web", "video calls and meetings"),
     "org.signal.Signal": ("Signal", "web", "private messages and calls"),
     "org.telegram.desktop": ("Telegram", "web", "messages"),
-    "org.mozilla.Thunderbird": ("Thunderbird", "web", "email program"),
+    "org.mozilla.thunderbird": ("Thunderbird", "web", "email program"),
     "org.videolan.VLC": ("VLC", "tv", "plays any video or music file, DVDs"),
     "org.libreoffice.LibreOffice": ("LibreOffice", "desktop", "documents, spreadsheets, slides (like Microsoft Office)"),
     "org.gimp.GIMP": ("GIMP", "desktop", "edit photos and pictures"),

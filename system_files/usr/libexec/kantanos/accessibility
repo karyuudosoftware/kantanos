@@ -1,0 +1,236 @@
+#!/usr/bin/python3
+"""KantanOS: make the PC easier to see and hear (Welcome → Tools, or the app menu).
+
+One window, big text, each choice works straight away:
+- the screen reader (Orca) reads out what's on the screen; Meta+Alt+S turns it on or off anywhere
+- everything bigger (display scale), bigger text, a bigger mouse pointer
+- the magnifier (Meta and + / Meta and -) and inverted colours (Meta+Ctrl+I)
+- Kan-chan: Meta+K from anywhere, she reads email and reminds about appointments out loud
+
+  accessibility             open the window
+  accessibility --self-test for the image checks
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont, QIcon
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFormLayout, QHBoxLayout, QLabel,
+                               QPushButton, QVBoxLayout, QWidget)
+
+TITLE = "Easier to see and hear"
+SCALES = [("Normal", 1.0), ("A bit bigger (125%)", 1.25), ("Bigger (150%)", 1.5), ("Much bigger (175%)", 1.75),
+          ("Biggest (200%)", 2.0)]
+TEXT = [("Normal", 10), ("Large", 13), ("Larger", 16), ("Largest", 20)]
+POINTER = [("Normal", 24), ("Large", 48), ("Extra large", 72)]
+FONT_KEYS = [("General", "font"), ("General", "menuFont"), ("General", "toolBarFont"),
+             ("General", "smallestReadableFont"), ("WM", "activeFont")]
+
+
+def run(*cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return subprocess.CompletedProcess(cmd, 1, "", "")
+
+
+def read(file, group, key, default=""):
+    out = run("kreadconfig6", "--file", file, "--group", group, "--key", key, "--default", default).stdout.strip()
+    return out or default
+
+
+def write(file, group, key, value):
+    run("kwriteconfig6", "--file", file, "--group", group, "--key", key, str(value))
+
+
+def kglobal_changed(kind):
+    """Tells running apps a setting changed (KGlobalSettings: 1 fonts, 5 cursor)."""
+    run("dbus-send", "--session", "--type=signal", "/KGlobalSettings", "org.kde.KGlobalSettings.notifyChange",
+        f"int32:{kind}", "int32:0")
+
+
+def kwin_reconfigure():
+    run("dbus-send", "--session", "--type=method_call", "--dest=org.kde.KWin", "/KWin", "org.kde.KWin.reconfigure")
+
+
+# ---- screen reader -------------------------------------------------------------------------
+def reader_on():
+    return read("kaccessrc", "ScreenReader", "Enabled", "false") == "true"
+
+
+def set_reader(on):
+    write("kaccessrc", "ScreenReader", "Enabled", "true" if on else "false")   # also at every login
+    if on:
+        if run("pgrep", "-u", str(os.getuid()), "-x", "orca").returncode != 0:
+            subprocess.Popen(["systemd-run", "--user", "--collect", "--quiet", "orca", "--replace"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        run("pkill", "-u", str(os.getuid()), "-x", "orca")
+
+
+# ---- sizes ---------------------------------------------------------------------------------
+def outputs():
+    """[(name, scale)] of the screens that are on."""
+    try:
+        data = json.loads(run("kscreen-doctor", "-j").stdout or "{}")
+    except ValueError:
+        return []
+    return [(o["name"], float(o.get("scale", 1))) for o in data.get("outputs", []) if o.get("enabled")]
+
+
+def set_scale(scale):
+    for name, _ in outputs():
+        run("kscreen-doctor", f"output.{name}.scale.{scale:g}")
+
+
+def text_size():
+    m = re.match(r"[^,]*,(\d+(?:\.\d+)?)", read("kdeglobals", "General", "font", "Noto Sans,10"))
+    return float(m.group(1)) if m else 10.0
+
+
+def set_text_size(points):
+    for group, key in FONT_KEYS:
+        cur = read("kdeglobals", group, key, "")
+        if not cur:
+            cur = "Noto Sans,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"
+        parts = cur.split(",")
+        size = points - 2 if key == "smallestReadableFont" else points
+        parts[1] = str(int(size))
+        write("kdeglobals", group, key, ",".join(parts))
+    kglobal_changed(1)
+
+
+def pointer_size():
+    try:
+        return int(read("kcminputrc", "Mouse", "cursorSize", "24"))
+    except ValueError:
+        return 24
+
+
+def set_pointer(size):
+    write("kcminputrc", "Mouse", "cursorSize", size)
+    theme = read("kcminputrc", "Mouse", "cursorTheme", "breeze_cursors")
+    run("plasma-apply-cursortheme", "--size", str(size), theme)
+    kglobal_changed(5)
+
+
+def plugin_on(name, default):
+    return read("kwinrc", "Plugins", f"{name}Enabled", "true" if default else "false") == "true"
+
+
+def set_plugin(name, on):
+    write("kwinrc", "Plugins", f"{name}Enabled", "true" if on else "false")
+    kwin_reconfigure()
+
+
+def nearest(options, value):
+    return min(range(len(options)), key=lambda i: abs(options[i][1] - value))
+
+
+class Window(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(TITLE)
+        self.setWindowIcon(QIcon.fromTheme("preferences-desktop-accessibility"))
+        f = self.font()
+        f.setPointSizeF(max(f.pointSizeF() * 1.35, 13))
+        self.setFont(f)
+        self.resize(820, 700)
+        v = QVBoxLayout(self)
+        v.setContentsMargins(28, 24, 28, 24)
+        v.setSpacing(14)
+        title = QLabel(TITLE)
+        tf = QFont(f); tf.setPointSizeF(f.pointSizeF() * 1.5); tf.setBold(True)
+        title.setFont(tf)
+        v.addWidget(title)
+        v.addWidget(self.note("Each choice works straight away. You can come back and change it any time."))
+
+        self.reader = QCheckBox("Read the screen out loud (screen reader)")
+        self.reader.setChecked(reader_on())
+        self.reader.toggled.connect(set_reader)
+        v.addWidget(self.reader)
+        v.addWidget(self.note("Turn it on or off from anywhere with Meta + Alt + S (Meta is the Windows-logo key). "
+                              "It reads whatever you move to with the keyboard: Tab moves between things, and "
+                              "Insert + Space opens its own settings (voice, speed)."))
+
+        form = QFormLayout()
+        form.setVerticalSpacing(12)
+        self.scale = QComboBox()
+        self.scale.addItems([n for n, _ in SCALES])
+        outs = outputs()
+        self.scale.setCurrentIndex(nearest(SCALES, outs[0][1] if outs else 1.0))
+        self.scale.currentIndexChanged.connect(lambda i: set_scale(SCALES[i][1]))
+        form.addRow("Size of everything:", self.scale)
+        self.text = QComboBox()
+        self.text.addItems([n for n, _ in TEXT])
+        self.text.setCurrentIndex(nearest(TEXT, text_size()))
+        self.text.currentIndexChanged.connect(lambda i: set_text_size(TEXT[i][1]))
+        form.addRow("Text size:", self.text)
+        self.pointer = QComboBox()
+        self.pointer.addItems([n for n, _ in POINTER])
+        self.pointer.setCurrentIndex(nearest(POINTER, pointer_size()))
+        self.pointer.currentIndexChanged.connect(lambda i: set_pointer(POINTER[i][1]))
+        form.addRow("Mouse pointer:", self.pointer)
+        v.addLayout(form)
+        v.addWidget(self.note("Some apps only pick up a new text size the next time they're opened."))
+
+        self.zoom = QCheckBox("Magnifier: Meta and + zooms in, Meta and - zooms out")
+        self.zoom.setChecked(plugin_on("zoom", True))
+        self.zoom.toggled.connect(lambda on: set_plugin("zoom", on))
+        v.addWidget(self.zoom)
+        self.invert = QCheckBox("Inverted colours with Meta + Ctrl + I (light text on dark, easier for some eyes)")
+        self.invert.setChecked(plugin_on("invert", False))
+        self.invert.toggled.connect(lambda on: set_plugin("invert", on))
+        v.addWidget(self.invert)
+
+        v.addSpacing(8)
+        k = QLabel("Kan-chan can help too")
+        kf = QFont(f); kf.setBold(True)
+        k.setFont(kf)
+        v.addWidget(k)
+        v.addWidget(self.note("Press Meta + K anywhere and talk; press it again when you've finished. She can read "
+                              "your email out loud and answer it (always asking before she sends or bins anything), "
+                              "and remind you about appointments. Set up email and the calendar in her window: "
+                              "“Email and calendar…”."))
+        row = QHBoxLayout()
+        meet = QPushButton(QIcon.fromTheme("kantanos-kanchan", QIcon.fromTheme("face-smile")), "Open Kan-chan")
+        meet.clicked.connect(lambda: subprocess.Popen(["/usr/libexec/kantanos/kanchan", "--enable"],
+                                                      start_new_session=True))
+        row.addWidget(meet)
+        row.addStretch()
+        done = QPushButton("Done")
+        done.clicked.connect(self.close)
+        row.addWidget(done)
+        v.addLayout(row)
+        v.addStretch()
+
+    @staticmethod
+    def note(text):
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setStyleSheet("color: palette(placeholder-text);")
+        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        return label
+
+
+def main():
+    if "--self-test" in sys.argv:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        app = QApplication(sys.argv)
+        Window()
+        assert nearest(TEXT, 15) == 2 and nearest(SCALES, 1.4) == 2
+        print("accessibility self-test ok")
+        return
+    app = QApplication(sys.argv)
+    app.setApplicationName("kantanos-accessibility")
+    app.setDesktopFileName("kantanos-accessibility")
+    w = Window()
+    w.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

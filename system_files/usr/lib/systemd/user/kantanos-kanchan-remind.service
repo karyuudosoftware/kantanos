@@ -1,0 +1,8 @@
+[Unit]
+Description=Kan-chan: calendar reminders
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/kantanos/kanchan-remind
+Nice=10

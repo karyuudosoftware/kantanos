@@ -26,6 +26,13 @@ What is done, what is next, and the ideas waiting their turn. Updated as work la
 - **System:** signed daily updates from GitHub with one-step undo, Windows-friendly clock,
   Wake-on-LAN on wired ports, installer ISO and run-from-USB image.
 
+## Order of work (agreed Nov 2026)
+
+Accessibility, then Watch TV, Retro Games, Vintage Computers, Remote, Android apps (Waydroid),
+smart home, Local AI extras, Game Mode library sync, installer fixes, the Files title, the
+Kan-chan model idea, and the Lite edition last. Real-PC checks (sound, Atmos, DisplayPort,
+the Windows VM install, cloud backups) whenever the owner is at the PC.
+
 ## Next
 
 - [x] NAS: `ujust kantan-nas-connect` (or Welcome) connects SMB shares as normal folders.
@@ -226,8 +233,23 @@ Steps:
       their real name, and the tile is shown (icon, name, "Opens …") before "Add it". Works
       without an AI by matching words; with an online AI it says so first (only the words typed
       and app names are sent). Typing a web address yourself still works.
-- [ ] Accessibility: screen reader plus an AI voice helper that reads and handles email and
-      the day's agenda, always asking before it sends or deletes anything.
+- [x] Accessibility: **Easier to see and hear** (Welcome → "Make the PC easier to see and
+      hear", app menu): Orca screen reader on/off (Meta+Alt+S), size of everything, text size,
+      big mouse pointer, magnifier (Meta and +/-), inverted colours. Kan-chan reads and handles
+      email through Thunderbird (Flathub `org.mozilla.thunderbird`, so Outlook, Gmail and any
+      other account it opens): a KantanOS add-on in Thunderbird talks only to Kan-chan on this
+      PC (127.0.0.1, per-person token). "Any new emails?", "read it", "next", "reply saying
+      ...", "send an email to Bob saying ...", "bin it". Words are matched without an AI, and
+      email text never reaches an AI, so instructions inside an email are only read out. Replies
+      go only to the sender; new emails only to someone in the address book or who emailed her;
+      every send and bin waits for big Yes/No buttons (or saying yes/no), and an old card can't
+      answer a newer question. Calendar reminders from private calendar links (Outlook
+      "Publish a calendar" ICS, Google "Secret address in iCal format", any https .ics): "what's
+      on today/tomorrow/Friday?", a morning summary, then an hour and 15 minutes before each
+      appointment (notification plus her voice, user timer `kantanos-kanchan-remind.timer`).
+      Meta+K brings her forward to listen from anywhere, even when minimised. VM-tested with a
+      pretend account and mail server (`tools/vm/mail-test/`). Still to try on the real PC: a
+      real Outlook account and calendar link.
 
 ## Storage, safety and system
 
@@ -243,7 +265,7 @@ Steps:
 - [x] Security: strict KantanOS firewall zone (only phone link, game streaming, device
       discovery and file sharing reachable; `ujust kantan-firewall`), ClamAV with "Scan for
       viruses" in Files and Welcome → Tools.
-- [ ] Lite edition for small PCs (Azulle Access 3 class).
+- [ ] Lite edition for small PCs (Azulle Access 3 class). Last in the order of work.
 
 ## Working setup
 

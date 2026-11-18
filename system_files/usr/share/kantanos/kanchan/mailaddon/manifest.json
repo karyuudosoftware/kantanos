@@ -1,0 +1,12 @@
+{
+  "manifest_version": 2,
+  "name": "Kan-chan email helper (KantanOS)",
+  "description": "Lets Kan-chan, the KantanOS companion on this PC, read your email aloud and send or bin emails when you say so. It only talks to Kan-chan on this PC.",
+  "version": "1.0",
+  "author": "KantanOS",
+  "browser_specific_settings": {
+    "gecko": {"id": "kanchan-mail@kantanos.org", "strict_min_version": "115.0"}
+  },
+  "background": {"scripts": ["config.js", "background.js"], "persistent": true},
+  "permissions": ["accountsRead", "messagesRead", "messagesUpdate", "messagesDelete", "addressBooks", "compose", "compose.send", "http://127.0.0.1/*"]
+}

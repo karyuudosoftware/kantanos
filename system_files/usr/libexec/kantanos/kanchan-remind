@@ -1,0 +1,84 @@
+#!/usr/bin/python3
+"""Kan-chan's calendar reminders (kantanos-kanchan-remind.timer, every 5 minutes, switched on in
+Kan-chan → Email and calendar). Reads the person's calendar links (agenda.py) and gives each
+reminder once, as a notification and, when "Say reminders out loud" is on, in her voice: the
+day's summary in the morning, then an hour and 15 minutes before each appointment.
+
+  kanchan-remind          check now (what the timer runs)
+  kanchan-remind --test   say a test reminder
+"""
+import datetime
+import json
+import os
+import subprocess
+import sys
+
+sys.path.insert(0, "/usr/share/kantanos/kanchan")
+import agenda  # noqa: E402
+
+HOME = os.path.expanduser("~")
+CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.join(HOME, ".config")), "kantanos", "helper.json")
+TITLE = "Kan-chan"
+
+
+def config():
+    try:
+        with open(CONF, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def busy_full_screen():
+    """A game or film full screen: no talking over it (the notification still comes)."""
+    r = subprocess.run(["busctl", "--user", "get-property", "org.freedesktop.Notifications",
+                        "/org/freedesktop/Notifications", "org.freedesktop.Notifications", "Inhibited"],
+                       capture_output=True, text=True, timeout=5)
+    return r.stdout.strip().endswith("true")
+
+
+def speak(cfg, text):
+    """In Kan-chan's voice (Piper, on this PC), when her voice has been downloaded."""
+    try:
+        import importlib.machinery
+        import importlib.util
+        loader = importlib.machinery.SourceFileLoader("kantanos_helper", "/usr/libexec/kantanos/helper")
+        H = importlib.util.module_from_spec(importlib.util.spec_from_loader("kantanos_helper", loader))
+        loader.exec_module(H)
+        voice = H.Voice(cfg.get("voice") or "en_US-hfc_female-medium")
+        if not voice.ready():
+            return
+        path, _ = voice.synthesize(H.spoken(H.speakable(text), H.load_me())[:900])
+        subprocess.run(["pw-play", path], timeout=120)
+    except Exception:  # noqa: BLE001 - the notification has already been shown
+        pass
+
+
+def tell(cfg, text):
+    subprocess.run(["notify-send", "-a", TITLE, "-i", "kantanos-kanchan", "-u", "normal", "-t", "60000",
+                    TITLE, text], timeout=10)
+    if cfg.get("kanchan_remind_speak", True) and not busy_full_screen():
+        speak(cfg, text)
+
+
+def main():
+    cfg = config()
+    if "--test" in sys.argv:
+        return tell(cfg, "This is how I'll remind you about your appointments.")
+    links = cfg.get("calendar_links") or []
+    if not links:
+        return
+    now = datetime.datetime.now().astimezone()
+    try:
+        evs, _ = agenda.all_events(links, now - datetime.timedelta(hours=2), now + datetime.timedelta(days=1))
+    except Exception:  # noqa: BLE001 - try again in 5 minutes
+        return
+    st = agenda.load_state()
+    msgs = agenda.due(evs, st, now)
+    agenda.save_state(st)
+    for text in msgs:
+        tell(cfg, text)
+
+
+if __name__ == "__main__":
+    main()
