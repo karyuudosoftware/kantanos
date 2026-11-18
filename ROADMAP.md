@@ -152,13 +152,21 @@ Steps:
       Israeli-Palestinian question it still frames one side as "critics"; its knowledge of
       upcoming dates can be off (she says it may be out of date). Notes are only kept when they
       come from what was actually said (guards against invented or copied notes).
-- [ ] 2. Seeing (webcam, opt-in): camera only while her window is open with "Let Kan-chan see"
-      on, with a visible sign. Recognises only people who were introduced (children by a
-      parent); guests ignored and never stored. Faces via OpenCV YuNet + SFace on the PC
-      (Apache 2.0); what she sees via Gemma 3's image understanding. Keeps no photos: only a
-      face fingerprint and a short appearance note per person ("short dark hair, glasses"),
-      shown in "What I remember", so she can notice changes ("you changed your hair!"). Never
-      comments on body, weight or health. Off when an online AI is chosen.
+- [~] 2. Seeing (webcam, opt-in): "Let me see (webcam)" in her window, asks once with a plain
+      explanation; camera only while the window is open, with a live preview and a red "I can
+      see" sign. "Introduce someone…" learns the nearest face (6 looks); only introduced people
+      are recognised, anyone else is a grey "?" and nothing about them is kept. Faces via OpenCV
+      YuNet (MIT) + SFace (Apache 2.0) on the PC (`usr/share/kantanos/kanchan/vision.py`, pip
+      opencv-python-headless, about 170 MB). No photos kept: a face fingerprint (12 per person)
+      and a short look note (hair, glasses, hat, top) from the local AI's image understanding,
+      listed in "What I remember" (rename, forget a face). Once per visit she looks twice, 20 s
+      apart, and only when both looks show a clear change in hair or glasses does she mention
+      it ("Oh, you changed your hair!"); shade, wording and greying never count, and nothing
+      about body, weight, skin, age or health. Greets introduced people who come into view.
+      Off with an online AI (names and sights never go online). Tested in the VM with a fake
+      camera (`KANTAN_KANCHAN_CAMERA=<image>`, public-domain NASA portraits): recognised the
+      same people from different photos (similarity 0.66-0.93 vs at most 0.20 for others),
+      greeted, noticed a staged haircut. Not tested yet: a real webcam (lighting, angles, kids).
 - [ ] 3. Noticing games and shows/films; she asks how they're going.
 - [ ] 4. Online look-ups with ask-first; gentle daily check-in; desktop buddy.
 - [ ] 5. Make your own character: design, personality, voice (character packs already work).

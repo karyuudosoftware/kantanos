@@ -4,7 +4,9 @@
 A character who lives on the PC: chat by talking or typing, she keeps notes about you (in a
 database in your home folder, all visible and editable in "What I remember"), brings things
 up, helps with everyday things like what to cook, and hands PC problems to the KantanOS
-Helper. Her voice, ears, name and AI settings are shared with the Helper.
+Helper. Her voice, ears, name and AI settings are shared with the Helper. If you let her, she
+can see through the webcam while her window is open: she recognises the people you introduce
+to her (on this PC; no photos are kept) and notices things like a new haircut.
 
   kanchan            open her window
   kanchan --enable   put her in the app menu (Welcome does this), then open
@@ -22,6 +24,7 @@ import urllib.parse
 
 sys.path.insert(0, "/usr/share/kantanos/kanchan")
 import brain  # noqa: E402
+import vision  # noqa: E402
 
 HELPER = "/usr/libexec/kantanos/helper"
 
@@ -36,7 +39,7 @@ def load_helper():
 H = load_helper()           # Voice, Ears, Avatar, NameDialog, Settings, AI settings and more
 
 from PySide6.QtCore import Qt, QTimer  # noqa: E402
-from PySide6.QtGui import QFont, QIcon  # noqa: E402
+from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap  # noqa: E402
 from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QDialogButtonBox, QFrame,  # noqa: E402
                                QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
                                QListWidgetItem, QMessageBox, QProgressBar, QPushButton, QScrollArea,
@@ -44,6 +47,9 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QDialogButtonBo
 
 TITLE = "Kan-chan"
 DESKTOP = "kantanos-kanchan.desktop"
+# Only for testing with an AI on another PC of your own (the build PC): treat it like the AI on
+# this PC, so notes, names and seeing work. Never set on a family PC.
+TEST_PRIVATE = bool(os.environ.get("KANTAN_KANCHAN_TEST_PRIVATE"))
 USER_APPS = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.join(H.HOME, ".local", "share")), "applications")
 
 
@@ -67,9 +73,10 @@ def set_in_menu(on):
 class Remembered(QDialog):
     """What I remember: every note, which you can add to, change or delete."""
 
-    def __init__(self, parent, memory, person):
+    def __init__(self, parent, memory, person, people=None):
         super().__init__(parent)
         self.mem = memory
+        self.people = people
         self.setWindowTitle("What I remember")
         self.resize(560, 480)
         lay = QVBoxLayout(self)
@@ -91,6 +98,21 @@ class Remembered(QDialog):
         wipe.clicked.connect(self.wipe)
         row.addWidget(wipe)
         lay.addLayout(row)
+        if people is not None and people.all():
+            lay.addWidget(QLabel("People I know by sight (a face fingerprint and how they looked; no photos):"))
+            self.faces = QListWidget()
+            self.faces.setMaximumHeight(140)
+            self.faces.setWordWrap(True)
+            lay.addWidget(self.faces)
+            prow = QHBoxLayout()
+            for text, icon, fn in (("Rename…", "document-edit", self.rename_person),
+                                   ("Forget this face", "edit-delete", self.forget_person)):
+                b = QPushButton(QIcon.fromTheme(icon), text)
+                b.clicked.connect(fn)
+                prow.addWidget(b)
+            prow.addStretch()
+            lay.addLayout(prow)
+            self.fill_people()
         close = QDialogButtonBox(QDialogButtonBox.Close)
         close.rejected.connect(self.reject)
         lay.addWidget(close)
@@ -108,6 +130,31 @@ class Remembered(QDialog):
             item = QListWidgetItem("Nothing yet. Tell me about yourself!")
             item.setFlags(Qt.NoItemFlags)
             self.list.addItem(item)
+
+    def fill_people(self):
+        self.faces.clear()
+        for p in self.people.all():
+            seen = f"last seen {p['seen'][:10]}" if p.get("seen") else "not seen yet"
+            look = f"; {p['look']}" if p.get("look") else ""
+            item = QListWidgetItem(f"{p['name']}    ({seen}{look})")
+            item.setToolTip(p.get("look") or "")
+            item.setData(Qt.UserRole, p["id"])
+            self.faces.addItem(item)
+
+    def rename_person(self):
+        item = self.faces.currentItem()
+        p = self.people.get(item.data(Qt.UserRole)) if item else None
+        if p:
+            name, ok = QInputDialog.getText(self, "Rename", "Name:", text=p["name"])
+            if ok and name.strip():
+                self.people.rename(p["id"], name)
+                self.fill_people()
+
+    def forget_person(self):
+        item = self.faces.currentItem()
+        if item:
+            self.people.delete(item.data(Qt.UserRole))
+            self.fill_people()
 
     def current(self):
         item = self.list.currentItem()
@@ -136,9 +183,13 @@ class Remembered(QDialog):
             self.fill()
 
     def wipe(self):
-        if QMessageBox.question(self, TITLE, "Forget everything I've noted? This can't be undone.",
-                                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
+        if QMessageBox.question(self, TITLE, "Forget everything I've noted, and everyone's face? This can't be "
+                                "undone.", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
             self.mem.clear()
+            if self.people is not None:
+                self.people.clear()
+                if hasattr(self, "faces"):
+                    self.fill_people()
             self.fill()
 
 
@@ -148,6 +199,13 @@ class Companion(QWidget):
         self.cfg = H.load()
         self.me = H.load_me()
         self.mem = brain.Memory(os.environ.get("KANTAN_KANCHAN_DB", brain.DB))
+        self.people = vision.People(self.mem.db)
+        self.cam = self.faces = self.last_frame = None
+        self.eye_busy = self.eye_close = self.first_look = self.describing = False
+        self.in_view = []                  # what she saw last: [{"pid", "name", "box", "feature"}]
+        self.seen_now, self.looks, self.changes, self.told = set(), {}, {}, set()
+        self.enrol = None
+        self.hello_wait, self.last_talk, self.thinking, self.said_hello = 0, 0.0, False, False
         self.bridge = H.Bridge()
         self.bridge.done.connect(self.on_done)
         self.bridge.progress.connect(self.on_progress)
@@ -157,7 +215,7 @@ class Companion(QWidget):
         self.listen_started, self.listen_toggle = 0.0, False
         self.setWindowTitle(TITLE)
         self.setWindowIcon(QIcon.fromTheme("kantanos-kanchan", QIcon.fromTheme("face-smile")))
-        self.resize(980, 700)
+        self.resize(1000, 760)
 
         pack = H.character_dir(self.cfg.get("character", "kan-chan"))
         info = {}
@@ -178,7 +236,7 @@ class Companion(QWidget):
         side = QVBoxLayout()
         self.avatar = H.Avatar(pack) if pack else QLabel()
         if pack:
-            self.avatar.setFixedSize(264, 330)
+            self.avatar.setFixedSize(240, 300)
         side.addWidget(self.avatar, 0, Qt.AlignHCenter)
         name = QLabel(self.char_name)
         f = QFont(); f.setPointSizeF(f.pointSizeF() * 1.7); f.setBold(True)
@@ -195,7 +253,31 @@ class Companion(QWidget):
         self.talk.setChecked(self.cfg.get("kanchan_voice", True))
         self.talk.toggled.connect(self.voice_toggled)
         side.addWidget(self.talk, 0, Qt.AlignHCenter)
-        side.addSpacing(10)
+        self.see = QCheckBox("Let me see (webcam)")
+        self.see.setToolTip("While this window is open I can see through the webcam: I recognise people you "
+                            "introduce to me and notice things like a new haircut. It all happens on this PC "
+                            "and no photos are kept.")
+        self.see.setVisible(vision.available())
+        self.see.toggled.connect(self.see_toggled)
+        side.addWidget(self.see, 0, Qt.AlignHCenter)
+        self.eye_box = QWidget()
+        ev = QVBoxLayout(self.eye_box)
+        ev.setContentsMargins(0, 0, 0, 0)
+        self.preview = QLabel()
+        self.preview.setFixedSize(224, 126)
+        self.preview.setAlignment(Qt.AlignCenter)
+        self.preview.setStyleSheet("background: black; border-radius: 6px;")
+        ev.addWidget(self.preview, 0, Qt.AlignHCenter)
+        sign = QLabel("● I can see. Only while this window is open.")
+        sign.setStyleSheet("color: #d03030;")
+        sign.setAlignment(Qt.AlignHCenter)
+        ev.addWidget(sign)
+        intro = QPushButton(QIcon.fromTheme("contact-new"), "Introduce someone…")
+        intro.clicked.connect(self.introduce)
+        ev.addWidget(intro)
+        self.eye_box.hide()
+        side.addWidget(self.eye_box)
+        side.addSpacing(6)
         for text, icon, fn in (("What I remember", "view-list-details", self.open_memory),
                                ("AI settings", "configure", self.open_settings)):
             b = QPushButton(QIcon.fromTheme(icon), text)
@@ -247,8 +329,11 @@ class Companion(QWidget):
         self.listen_limit = QTimer(self, singleShot=True, interval=H.LISTEN_MAX * 1000, timeout=self.stop_listening)
         self.speech = QTimer(self, interval=40, timeout=self.mouth_step)
         self.levels, self.level_i = [], 0
+        self.eye_timer = QTimer(self, interval=1500, timeout=self.eye_tick)
         self.show_name()
         self.show_ai()
+        if self.cfg.get("kanchan_see") and not self.eyes_blocked():
+            self.see.setChecked(True)
         QTimer.singleShot(400, self.hello)
 
     # ---- the AI --------------------------------------------------------------------------
@@ -256,7 +341,7 @@ class Companion(QWidget):
         """(endpoint, private) or (None, why): private means the AI runs on this PC."""
         ep = brain.endpoint(self.cfg, H.local_model()[0])
         if ep["kind"] == "openai":
-            return ep, False
+            return ep, TEST_PRIVATE
         if not H.ollama_up() or not H.local_ready(ep["model"]):
             return None, "local-missing"
         return ep, True
@@ -264,9 +349,16 @@ class Companion(QWidget):
     def show_ai(self):
         if self.cfg.get("provider") == "online" and self.cfg.get("online_url"):
             host = urllib.parse.urlparse(self.cfg["online_url"]).hostname or "online"
-            self.ai_label.setText(f"AI: {host} (online). Your notes stay on this PC.")
+            self.ai_label.setText(f"AI: {host} (online). Your notes stay on this PC."
+                                  + (" Test mode: treated as private." if TEST_PRIVATE else ""))
         else:
             self.ai_label.setText("AI: on this PC (private)")
+        why = self.eyes_blocked()
+        self.see.setEnabled(why != "engine")
+        if why == "online":
+            if self.see.isChecked():
+                self.see.setChecked(False)
+            self.see.setToolTip("Seeing works only with the AI on this PC, so nothing I see ever goes online.")
 
     def ask_online(self):
         if self.online_ok:
@@ -290,14 +382,24 @@ class Companion(QWidget):
         person = self.me.get("name", "") if private else ""
         history = self.chat if private else [{"role": m["role"], "content": H.redact(m["content"])}
                                              for m in self.chat]
-        return brain.build_messages(self.char_name, person, notes, history + ([extra] if extra else []))
+        msgs = brain.build_messages(self.char_name, person, notes, history + ([extra] if extra else []))
+        if private and self.see.isChecked() and self.in_view:     # names and sights never go online
+            view = [{"name": p["name"], "change": self.changes.get(p["pid"])} for p in self.in_view]
+            self.told = {p["pid"] for p in self.in_view if p["pid"] in self.changes}
+            msgs[0]["content"] += "\n\n" + vision.scene(view)
+        return msgs
 
     def hello(self):
+        if self.see.isChecked() and not self.first_look and self.hello_wait < 10:
+            self.hello_wait += 1               # say hello once I've had a first look
+            QTimer.singleShot(400, self.hello)
+            return
+        self.said_hello = True
         name = self.me.get("name")
         greet = {"morning": "Good morning", "afternoon": "Hi", "evening": "Good evening",
                  "night": "Hi"}[brain.part_of_day()]
         ep, private = self.ai()
-        if ep and private and self.mem.all():
+        if ep and private is True and (self.mem.all() or any(p["pid"] for p in self.in_view)):
             self.mood("think")
             self.in_thread("opener", self.run_ai, ep, self.messages(True, brain.opener_turn(name)))
             return
@@ -322,6 +424,24 @@ class Companion(QWidget):
             self.cfg["kanchan_voice_asked"] = True
             H.save(self.cfg)
             self.offer_voice()
+
+    def quiet(self):
+        """Nobody's talking: fine for her to bring something up herself."""
+        return (self.said_hello and not self.thinking and not self.ears.recording()
+                and time.monotonic() - self.last_talk > 20)
+
+    def speak_up(self, why):
+        """Say something on her own (someone came in, she noticed something)."""
+        ep, private = self.ai()
+        if not ep or private is not True:
+            return False
+        self.thinking = True
+        self.last_talk = time.monotonic()
+        self.in_thread("aside", self.run_ai, ep, self.messages(True, {"role": "user", "content":
+                       f"(Not said aloud: {why} Say it in one short, friendly sentence. "
+                       + ("Don't greet the person you're already talking with again. " if self.chat else "")
+                       + "Leave remember and forget empty.)"}))
+        return True
 
     @staticmethod
     def run_ai(ep, msgs):
@@ -348,6 +468,7 @@ class Companion(QWidget):
         if not ep:
             return self.without_ai(text, intent)
         self.mood("think")
+        self.thinking = True
         self.status.setText(f"{self.char_name} is thinking…")
         self.in_thread("chat", self.run_ai, ep, self.messages(private))
 
@@ -371,6 +492,11 @@ class Companion(QWidget):
 
     def answer(self, ans, keep=True, said=""):
         self.status.setText("")
+        self.thinking = False
+        self.last_talk = time.monotonic()
+        for pid in self.told:                 # she's had the chance to mention it now
+            self.changes.pop(pid, None)
+        self.told = set()
         reply = ans.get("reply") or "Hmm, I'm not sure what to say. Could you put it another way?"
         self.bubble(reply, False)
         if keep:
@@ -572,7 +698,216 @@ class Companion(QWidget):
             self.answer({"reply": f"Nice to meet you, {self.me['name']}!"}, keep=True)
 
     def open_memory(self):
-        Remembered(self, self.mem, self.me.get("name")).exec()
+        Remembered(self, self.mem, self.me.get("name"), self.people).exec()
+
+    # ---- seeing ----------------------------------------------------------------------------
+    def eyes_blocked(self):
+        """Why she can't see right now ("" if she can)."""
+        if not vision.available():
+            return "engine"
+        if self.cfg.get("provider") == "online" and self.cfg.get("online_url") and not TEST_PRIVATE:
+            return "online"
+        if not vision.has_camera():
+            return "camera"
+        return ""
+
+    def see_toggled(self, on):
+        if not on:
+            self.cfg["kanchan_see"] = False
+            H.save(self.cfg)
+            return self.stop_eyes()
+        why = self.eyes_blocked()
+        if why:
+            self.see.setChecked(False)
+            self.status.setText({"camera": "I can't find a webcam. Plug one in and try again.",
+                                 "online": "Seeing works only with the AI on this PC (AI settings), so nothing "
+                                           "I see ever goes online.",
+                                 "engine": "Seeing isn't installed on this PC."}[why])
+            return
+        if not self.cfg.get("kanchan_see_ok"):
+            box = QMessageBox(self)
+            box.setWindowTitle(TITLE)
+            box.setIcon(QMessageBox.Question)
+            box.setText("Let me see through the webcam?")
+            box.setInformativeText(
+                "While my window is open I'll look every couple of seconds. I recognise only people you "
+                "introduce to me (press “Introduce someone”); anyone else is ignored and nothing about them "
+                "is kept. For people I know, I keep a face fingerprint and a short note of how they looked "
+                "(hair, glasses), so I can say things like “you changed your hair!”. No photos are saved, "
+                "and nothing I see goes online. You can switch this off any time.")
+            box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            box.button(QMessageBox.Yes).setText("Let her see")
+            box.button(QMessageBox.No).setText("Not now")
+            if box.exec() != QMessageBox.Yes:
+                self.see.setChecked(False)
+                return
+            self.cfg["kanchan_see_ok"] = True
+        self.cfg["kanchan_see"] = True
+        H.save(self.cfg)
+        self.cam = vision.Camera()
+        self.eye_close = False
+        self.in_thread("eye-open", self.open_eyes)
+
+    def open_eyes(self):
+        if not self.cam.open():
+            return False
+        if not self.faces:
+            self.faces = vision.Faces()
+        return True
+
+    def stop_eyes(self):
+        self.eye_timer.stop()
+        self.eye_box.hide()
+        self.in_view, self.enrol = [], None
+        if self.cam:
+            if self.eye_busy:
+                self.eye_close = True          # closed when the current look is done
+            else:
+                self.cam.close()
+                self.cam = None
+
+    def eye_tick(self):
+        if self.eye_busy or not self.cam:
+            return
+        self.eye_busy = True
+        self.in_thread("look", self.look_once)
+
+    def look_once(self):
+        frame = self.cam.grab()
+        if frame is None:
+            return None
+        found = self.faces.find(frame)
+        self.last_frame = frame
+        cv2 = vision.cv2
+        h, w = frame.shape[:2]
+        scale = 224 / w
+        small = cv2.cvtColor(cv2.resize(frame, (224, max(1, int(h * scale)))), cv2.COLOR_BGR2RGB)
+        return {"rgb": small.copy(), "scale": scale, "faces": found}
+
+    def saw(self, value):
+        self.first_look = True
+        view = []
+        for f in value["faces"]:
+            pid, _ = self.people.match(f["feature"])
+            person = self.people.get(pid) if pid else None
+            view.append({"pid": pid, "name": person["name"] if person else None, "box": f["box"],
+                         "feature": f["feature"]})
+        self.in_view = view
+        self.draw_preview(value["rgb"], value["scale"], view)
+        if self.enrol:
+            return self.enrol_step(view)
+        owner = (self.me.get("name") or "").lower()
+        for p in view:
+            if p["pid"] and p["pid"] not in self.seen_now:
+                self.seen_now.add(p["pid"])
+                self.people.saw(p["pid"])
+                if p["name"].lower() != owner and self.quiet():
+                    if not self.speak_up(f"{p['name']} has just come into view of your webcam: say hello to "
+                                         f"{p['name']}."):
+                        self.answer({"reply": f"Hi, {p['name']}!"}, keep=True)
+        for p in view:
+            if p["pid"]:
+                self.look_check(p)
+        if self.changes and self.quiet() and not self.told:
+            pid, what = next(iter(self.changes.items()))
+            person = self.people.get(pid)
+            if person and any(p["pid"] == pid for p in view):
+                self.speak_up(f"you've just noticed something new about {person['name']}: {what}. Mention it "
+                              "kindly.")
+
+    def draw_preview(self, rgb, scale, view):
+        h, w = rgb.shape[:2]
+        img = QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+        paint = QPainter(img)
+        for p in view:
+            x, y, bw, bh = (int(v * scale) for v in p["box"])
+            paint.setPen(QPen(QColor("#3cc864") if p["pid"] else QColor("#b0b0b0"), 2))
+            paint.drawRect(x, y, bw, bh)
+            paint.drawText(x, max(10, y - 3), p["name"] or "?")
+        paint.end()
+        self.preview.setPixmap(QPixmap.fromImage(img).scaled(self.preview.size(), Qt.KeepAspectRatio,
+                                                             Qt.SmoothTransformation))
+
+    def look_check(self, p):
+        """Once per visit: how do they look today, and has something clearly changed?"""
+        ep, private = self.ai()
+        st = self.looks.setdefault(p["pid"], {"stage": 0, "t": 0.0, "a": None})
+        if not ep or private is not True or self.describing or st["stage"] >= 2 or self.last_frame is None:
+            return
+        if st["stage"] == 1 and time.monotonic() - st["t"] < 20:
+            return                              # a second look a little later, to be sure
+        jpg = vision.head_and_shoulders(self.last_frame, p["box"])
+        if not jpg:
+            return
+        self.describing = True
+        pid, stage = p["pid"], st["stage"]
+        self.in_thread("describe", lambda: (pid, stage, vision.describe(ep, jpg)))
+
+    def described(self, value):
+        pid, stage, look = value
+        st = self.looks.get(pid)
+        person = self.people.get(pid)
+        if not st or not person:
+            return
+        if not look:
+            st["stage"] = 2                     # this AI can't see pictures: just recognise people
+            return
+        before = person.get("look")
+        if stage == 0:
+            st.update(stage=1, t=time.monotonic(), a=look)
+            if not before:
+                self.people.set_look(pid, look)
+                st["stage"] = 2
+            return
+        st["stage"] = 2
+        ep, _ = self.ai()
+        first = st["a"]
+
+        def compare():
+            what = vision.changed(ep, before, first)
+            return pid, (what if what and vision.changed(ep, before, look) else ""), look
+        self.describing = True
+        self.in_thread("changed", compare)
+
+    def introduce(self):
+        if not self.in_view:
+            self.status.setText("I can't see anyone right now. Sit in front of the webcam, then try again.")
+            return
+        near = self.in_view[0]
+        owner = self.me.get("name") or ""
+        default = near["name"] or ("" if not owner or self.people.by_name(owner) else owner)
+        name, ok = QInputDialog.getText(
+            self, "Introduce someone", "Who's nearest the webcam right now?\n\nI'll only recognise people "
+            "introduced here. Anyone else is ignored and nothing about them is kept.", text=default)
+        name = name.strip()
+        if not ok or not name:
+            return
+        if near["name"] and near["name"].lower() != name.lower():
+            if QMessageBox.question(self, TITLE, f"That looks like {near['name']} to me. Is it really {name}?",
+                                    QMessageBox.Yes | QMessageBox.No) != QMessageBox.Yes:
+                return
+        pid = self.people.add(name)
+        self.enrol = {"pid": pid, "name": name, "left": 6, "first": None}
+        self.status.setText(f"Hold still for a moment, {name}: I'm learning your face…")
+
+    def enrol_step(self, view):
+        e = self.enrol
+        if not view:
+            return
+        f = view[0]["feature"]
+        if e["first"] is None:
+            e["first"] = f
+        elif float(vision.np.dot(e["first"], f)) < vision.SAME:
+            return                              # someone else moved in front: skip this look
+        self.people.add_face(e["pid"], f)
+        e["left"] -= 1
+        if e["left"] > 0:
+            return
+        self.enrol = None
+        self.seen_now.add(e["pid"])
+        self.people.saw(e["pid"])
+        self.status.setText("")
+        self.answer({"reply": f"Nice to meet you, {e['name']}! I'll know you next time."}, keep=True)
 
     def open_settings(self):
         d = H.Settings(self, self.cfg)
@@ -629,6 +964,46 @@ class Companion(QWidget):
 
     def on_done(self, name, result):
         kind, value = result
+        if name == "aside":
+            self.thinking = False
+            if kind == "ok" and value.get("reply"):
+                value["remember"], value["forget"] = [], []
+                self.answer(value)
+            return
+        if name == "eye-open":
+            if kind == "ok" and value:
+                self.eye_box.show()
+                self.eye_timer.start()
+                self.eye_tick()
+            else:
+                self.see.setChecked(False)
+                self.first_look = True
+                self.status.setText("The webcam couldn't be opened. Is another app using it?")
+            return
+        if name == "look":
+            self.eye_busy = False
+            if self.eye_close and self.cam:
+                self.cam.close()
+                self.cam, self.eye_close = None, False
+                return
+            if kind == "ok" and value and self.see.isChecked():
+                self.saw(value)
+            else:
+                self.first_look = True
+            return
+        if name == "describe":
+            self.describing = False
+            if kind == "ok":
+                self.described(value)
+            return
+        if name == "changed":
+            self.describing = False
+            if kind == "ok":
+                pid, what, look = value
+                self.people.set_look(pid, look)
+                if what:
+                    self.changes[pid] = what
+            return
         if name in ("chat", "opener"):
             said = self.chat[-1]["content"] if self.chat and self.chat[-1]["role"] == "user" else ""
             if kind == "ok":
@@ -637,6 +1012,7 @@ class Companion(QWidget):
                 self.answer({"reply": f"Hi{', ' + self.me['name'] if self.me.get('name') else ''}! "
                                       "What's on your mind?"})
             else:
+                self.thinking = False
                 self.mood("worried")
                 self.status.setText(f"The AI didn't answer ({value[:120]}).")
         elif name == "stt":
@@ -668,6 +1044,7 @@ class Companion(QWidget):
                                 else f"Setting up the AI didn't finish: {value}")
 
     def closeEvent(self, event):
+        self.stop_eyes()
         self.voice.stop()
         if self.ears.recording():
             self.ears.stop()
@@ -683,6 +1060,14 @@ def self_test():
     assert brain.parse('{"reply": "Hi", "forget": [1, 99]}', m.all())["forget"] == [1]
     assert not brain.keep_note("Votes for the Green party", "I vote Green")
     assert "impartial" in brain.personality("Kan-chan", "Sam")
+    if vision.available():
+        people = vision.People(m.db)
+        a = vision.np.ones(128, dtype="float32") / vision.np.sqrt(128)
+        pid = people.add("Sam")
+        people.add_face(pid, a)
+        assert people.match(a)[0] == pid and people.match(-a)[0] is None
+        vision.Faces()                       # the face models load
+        assert "Sam is here (nearest" in vision.scene([{"name": "Sam"}])
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     os.environ["KANTAN_KANCHAN_DB"] = ":memory:"
     app = QApplication(sys.argv)

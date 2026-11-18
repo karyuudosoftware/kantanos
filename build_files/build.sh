@@ -60,6 +60,23 @@ python3 -c "import piper"
 # the speech model downloads on first use, after asking)
 dnf5 -y install python3-pywhispercpp
 python3 -c "import pywhispercpp.model, numpy"
+# ...and its eyes (Kan-chan, only if the person switches it on): OpenCV face detection and
+# recognition. The slim pip build (about 170 MB); Fedora's python3-opencv pulls in 730 MB.
+pip3 install --prefix=/usr --no-deps --only-binary=:all: --root-user-action=ignore --no-cache-dir \
+    opencv-python-headless==5.1.0.95
+python3 -c "import cv2; cv2.FaceDetectorYN; cv2.FaceRecognizerSF"
+# The face models from the OpenCV model zoo: YuNet (MIT) and SFace (Apache 2.0)
+VISION=/usr/share/kantanos/kanchan/vision
+mkdir -p "$VISION" /usr/share/licenses/kantanos-kanchan-vision
+ZOO=https://github.com/opencv/opencv_zoo/raw/main/models
+curl -fsSL --retry 3 -o "$VISION/face_detection_yunet_2023mar.onnx" "$ZOO/face_detection_yunet/face_detection_yunet_2023mar.onnx"
+curl -fsSL --retry 3 -o "$VISION/face_recognition_sface_2021dec.onnx" "$ZOO/face_recognition_sface/face_recognition_sface_2021dec.onnx"
+curl -fsSL --retry 3 -o /usr/share/licenses/kantanos-kanchan-vision/YuNet-LICENSE "$ZOO/face_detection_yunet/LICENSE"
+curl -fsSL --retry 3 -o /usr/share/licenses/kantanos-kanchan-vision/SFace-LICENSE "$ZOO/face_recognition_sface/LICENSE"
+sha256sum -c - <<'SUMS'
+8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4  /usr/share/kantanos/kanchan/vision/face_detection_yunet_2023mar.onnx
+0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79  /usr/share/kantanos/kanchan/vision/face_recognition_sface_2021dec.onnx
+SUMS
 systemctl disable ollama.service 2>/dev/null || true
 
 # Virus scanning: ClamAV, its list of known viruses kept up to date in the background, and
