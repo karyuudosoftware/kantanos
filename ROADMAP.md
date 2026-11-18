@@ -178,7 +178,7 @@ Steps:
       never commenting on how long. Tested in the VM with a fake Steam game and a fake MPRIS
       player: both noticed, Proton skipped, and asked for ideas she suggested "a new run" of the
       game. Not yet: Heroic games (no reliable game name in the process), a real Steam library.
-- [~] 4. Online look-ups with ask-first; gentle daily check-in; desktop buddy.
+- [x] 4. Online look-ups with ask-first; gentle daily check-in; desktop buddy.
       Look-ups done: she sets "lookup" (weather / facts / web) and a card shows exactly what
       would go online ("I'd ask the Open-Meteo weather service for “Osaka”. Nothing else is
       sent.") with Look it up / No thanks. Sources need no account: Open-Meteo (weather, town
@@ -192,7 +192,12 @@ Steps:
       person's autostart; once a day at login a notification (30 s) says hello, with a
       reminder when a plan note is dated today or tomorrow ("19 November", "November 19th",
       "11月19日"), and "Talk to Kan-chan" opens her window carrying on from it. No AI needed.
-      Tested in the VM. Still to do: desktop buddy.
+      Tested in the VM.
+      Desktop buddy done: "Sit on my desktop" adds the `org.kantanos.kanchan` Plasma widget
+      (bottom right, above the dock) through a desktop script; she blinks and sways, smiles
+      when the mouse is over her, shows her daily hello in a speech bubble for a minute, and
+      opens her window when clicked (kstart, so the window is its own app). Unticking removes
+      her. Tested in the VM.
 - [ ] 5. Make your own character: design, personality, voice (character packs already work).
 
 - [ ] Idea, later: a "Kan-chan model". Fine-tune an open model (LoRA on Gemma/Qwen/Mistral,

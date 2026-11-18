@@ -98,6 +98,7 @@ check "Kan-chan character and voice engine"   "test -s /usr/share/kantanos/helpe
 check "Kan-chan companion app (memory, window)" "QT_QPA_PLATFORM=offscreen HOME=/tmp/kc timeout 60 /usr/libexec/kantanos/kanchan --self-test | grep -q ok && test -s /usr/share/applications/kantanos-kanchan.desktop && test -s /usr/share/icons/hicolor/scalable/apps/kantanos-kanchan.svg"
 check "Kan-chan eyes (OpenCV face models)"  "cd /usr/share/kantanos/kanchan && python3 -c \"import vision; assert vision.available(); vision.Faces()\" && test -s /usr/share/licenses/kantanos-kanchan-vision/SFace-LICENSE"
 check "Kan-chan noticing (opt-in service)"  "python3 -m py_compile /usr/libexec/kantanos/kanchan-notice && test -f /usr/lib/systemd/user/kantanos-kanchan-notice.service && python3 -c \"import dbus, psutil\""
+check "Kan-chan desktop buddy widget"  "test -s /usr/share/plasma/plasmoids/org.kantanos.kanchan/metadata.json && grep -q kstart /usr/share/plasma/plasmoids/org.kantanos.kanchan/contents/ui/main.qml && command -v kstart"
 check "Windows drive notice says KantanOS"  "grep -q sender=.KantanOS /usr/libexec/ntfs-exfat-monitor-script"
 check ".exe and .msi open with kantan-windows" "grep -q x-msi=kantanos-windows-program.desktop /etc/xdg/mimeapps.list && grep -q x-ms-dos-executable=kantanos-windows-program.desktop /etc/xdg/mimeapps.list"
 check "32-bit Windows programs allowed (SELinux)" "matchpathcon /usr/lib64/wine-wow64/wine/i386-windows/ntdll.dll | grep -q textrel_shlib_t"

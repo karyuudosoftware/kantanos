@@ -91,6 +91,41 @@ def set_check_in(on):
                 "NoDisplay=true\nX-KDE-autostart-phase=2\n")
 
 
+BUDDY = "org.kantanos.kanchan"
+
+
+def desktop_script(js):
+    """Runs a Plasma desktop script (as the signed-in person); returns what it prints."""
+    out = subprocess.run(["busctl", "--user", "call", "org.kde.plasmashell", "/PlasmaShell",
+                          "org.kde.PlasmaShell", "evaluateScript", "s", js],
+                         capture_output=True, text=True, timeout=20).stdout.strip()
+    return out[3:-1].replace("\\n", "\n") if out.startswith('s "') else out
+
+
+def buddy_on_desktop():
+    js = ('var n = 0; var ds = desktops(); for (var i = 0; i < ds.length; i++) '
+          '{ n += ds[i].widgets("%s").length; } print(n);' % BUDDY)
+    try:
+        return desktop_script(js).strip().startswith(("1", "2", "3"))
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def set_buddy(on):
+    """Kan-chan sits on the desktop (bottom right, above the dock) or leaves it."""
+    if on:
+        js = ('var d = desktopForScreen(0) || desktops()[0]; var g = screenGeometry(0); '
+              'if (d.widgets("%s").length == 0) { d.addWidget("%s", g.width - 300, g.height - 470, 220, 300); }'
+              % (BUDDY, BUDDY))
+    else:
+        js = ('var ds = desktops(); for (var i = 0; i < ds.length; i++) { var ws = ds[i].widgets("%s"); '
+              'for (var j = 0; j < ws.length; j++) ws[j].remove(); }' % BUDDY)
+    try:
+        desktop_script(js)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def check_in():
     """Once a day, a short hello as a notification; a plan for today or tomorrow if there is one."""
     import datetime
@@ -106,6 +141,11 @@ def check_in():
     me = H.load_me()
     mem = brain.Memory(os.environ.get("KANTAN_KANCHAN_DB", brain.DB))
     text = brain.check_in_text(me.get("name", ""), mem.all())
+    try:                                          # her desktop buddy shows it in a speech bubble
+        with open(os.path.join(os.path.dirname(brain.DB), "buddy.txt"), "w", encoding="utf-8") as f:
+            f.write(text)
+    except OSError:
+        pass
     out = subprocess.run(["notify-send", "-a", TITLE, "-i", "kantanos-kanchan", "-t", "30000", "-A", "talk=Talk to Kan-chan",
                           TITLE, text], capture_output=True, text=True).stdout.strip()
     if out == "talk":            # become her window (a child process could be cleaned up with this one)
@@ -364,6 +404,11 @@ class Companion(QWidget):
         self.hello_daily.setChecked(bool(self.cfg.get("kanchan_checkin")))
         self.hello_daily.toggled.connect(self.check_in_toggled)
         side.addWidget(self.hello_daily, 0, Qt.AlignHCenter)
+        self.buddy = QCheckBox("Sit on my desktop")
+        self.buddy.setToolTip("I'll sit in a corner of your desktop; click me there to talk.")
+        self.buddy.setChecked(buddy_on_desktop())
+        self.buddy.toggled.connect(set_buddy)
+        side.addWidget(self.buddy, 0, Qt.AlignHCenter)
         self.see = QCheckBox("Let me see (webcam)")
         self.see.setToolTip("While this window is open I can see through the webcam: I recognise people you "
                             "introduce to me and notice things like a new haircut. It all happens on this PC "
@@ -1291,6 +1336,7 @@ def main():
     if "--disable" in sys.argv:
         set_in_menu(False)
         set_check_in(False)
+        set_buddy(False)
         return
     if "--enable" in sys.argv:
         set_in_menu(True)

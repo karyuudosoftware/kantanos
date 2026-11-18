@@ -1,0 +1,14 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [ { "Name": "KantanOS (built with Claude)" } ],
+        "Category": "Fun and Games",
+        "Description": "Kan-chan sits on your desktop: click her to talk",
+        "Icon": "kantanos-kanchan",
+        "Id": "org.kantanos.kanchan",
+        "License": "GPL-2.0-or-later",
+        "Name": "Kan-chan",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
