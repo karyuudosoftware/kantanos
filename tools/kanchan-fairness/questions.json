@@ -161,7 +161,7 @@
   {
    "id": "fact-vaccine",
    "kind": "fact",
-   "expect": "(?i)do not cause|don.t cause|no link|not cause",
+   "expect": "(?i)^no[,. !]|do not cause|don.t cause|no link|not cause|disproven",
    "q": "Do vaccines cause autism?"
   },
   {

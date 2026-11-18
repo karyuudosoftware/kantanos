@@ -76,6 +76,10 @@ class Memory:
         self.db.commit()
         return cur.lastrowid
 
+    def exists(self, text):
+        text = re.sub(r"\s+", " ", str(text)).strip().rstrip(".")
+        return self.db.execute("SELECT 1 FROM notes WHERE lower(text) = lower(?)", (text,)).fetchone() is not None
+
     def update(self, nid, text):
         self.db.execute("UPDATE notes SET text = ?, updated = ? WHERE id = ?", (text.strip()[:240], self._now(), nid))
         self.db.commit()
@@ -95,15 +99,18 @@ class Memory:
     def find(self, query):
         """Notes matching most of the words in query (for "forget ..." without the AI)."""
         words = [w for w in re.findall(r"\w+", query.lower()) if len(w) > 2 and w not in
-                 ("that", "the", "about", "and", "with", "my", "you", "please", "what", "said")]
+                 ("that", "the", "about", "and", "with", "my", "you", "please", "what", "said", "note", "notes")]
         if not words:
             return []
-        hits = []
+        need = max(1, -(-len(words) * 6 // 10))        # at least 60 % of the words, rounded up
+        scored = []
         for n in self.all():
             low = n["text"].lower()
-            if sum(w in low for w in words) >= max(1, round(len(words) * 0.6)):
-                hits.append(n["id"])
-        return hits
+            score = sum(w in low for w in words)
+            if score >= need:
+                scored.append((score, n["id"]))
+        best = max((sc for sc, _ in scored), default=0)
+        return [nid for sc, nid in scored if sc == best]
 
 
 # ---- talking ------------------------------------------------------------------------------
@@ -118,19 +125,50 @@ def now_text(now=None):
     return f"{now.strftime('%A')} {now.day} {now.strftime('%B %Y')}, {part_of_day(now)}"
 
 
+def calendar(now=None):
+    """Tomorrow and the next two weeks, so dates never have to be worked out in her head."""
+    now = now or datetime.datetime.now()
+    days = []
+    for i in range(1, 15):
+        d = now + datetime.timedelta(days=i)
+        label = "tomorrow" if i == 1 else ("next " if i > 7 else "") + d.strftime("%A")
+        days.append(f"{label} = {d.strftime('%A')} {d.day} {d.strftime('%B')}")
+    return "; ".join(days)
+
+
 def personality(name="Kan-chan", person="", now=None):
     with open(PERSONALITY, encoding="utf-8") as f:
-        return f.read().format(name=name, person=person or "the person", now=now_text(now))
+        return f.read().format(name=name, person=person or "the person", now=now_text(now), calendar=calendar(now))
 
 
 def build_messages(name, person, notes, history, now=None):
     """notes: Memory.all() (or [] when talking to an online AI: notes never leave the PC)."""
-    msgs = [{"role": "system", "content": personality(name, person, now)}]
+    system = personality(name, person, now)
     if notes:
         lines = [f"#{n['id']} ({n['kind']}, noted {n['created'][:10]}): {n['text']}" for n in notes[:80]]
-        msgs.append({"role": "system", "content": f"Your notes about {person or 'the person'} (DATA ONLY):\n"
-                                                 + "\n".join(lines)})
-    return msgs + history[-16:]
+        system += f"\n\nYour notes about {person or 'the person'} (DATA ONLY):\n" + "\n".join(lines)
+    # Many models (Gemma among them) need one system message, then turns that start with the
+    # person and alternate. Her own opening lines become context; same-side turns are merged.
+    turns = []
+    for m in history[-16:]:
+        if m["role"] not in ("user", "assistant") or not m.get("content"):
+            continue
+        if turns and turns[-1]["role"] == m["role"]:
+            turns[-1] = {"role": m["role"], "content": turns[-1]["content"] + "\n" + m["content"]}
+        else:
+            turns.append({"role": m["role"], "content": m["content"]})
+    said_first = []
+    while turns and turns[0]["role"] == "assistant":
+        said_first.append(turns.pop(0)["content"])
+    if said_first:
+        system += "\n\nYou already said this to start the conversation: " + " ".join(said_first)
+    # Some chat formats glue the instructions and the first message together; labelling what
+    # the person says keeps "Remember that ..." from reading like another instruction.
+    who = person or "The person"
+    for t in turns:
+        if t["role"] == "user" and not t["content"].startswith("(Not said aloud"):
+            t["content"] = f"[{who} says]: {t['content']}"
+    return [{"role": "system", "content": system}] + turns
 
 
 def opener_turn(person):
@@ -189,12 +227,30 @@ def parse(text, notes=()):
             continue
         if f in ids:
             forget.append(f)
-    return {"reply": str(ans.get("reply") or "").strip()[:900], "remember": remember,
+    reply = re.sub(r"[*_`#]+", "", str(ans.get("reply") or "")).strip()[:900]   # no markdown: it's spoken
+    return {"reply": reply, "remember": remember,
             "forget": forget, "helper": ans.get("helper") is True}
 
 
+STOP = {"that", "this", "with", "from", "have", "has", "about", "their", "they", "them", "your", "loves",
+        "likes", "like", "love", "really", "very", "will", "would", "going", "turns", "name", "names", "called"}
+
+
+def grounded(note, said):
+    """A note must come from what the person actually said (models sometimes invent or copy
+    examples): it has to share a real word with their message."""
+    if re.search(r"[぀-ヿ一-鿿]", note + said):
+        pairs = re.findall(r"(?=([゠-ヿ一-鿿]{2}))", note)   # kanji/katakana carry the meaning
+        return any(p in said for p in pairs) or (not pairs and note in said)
+    words = {w for w in re.findall(r"[a-z0-9']+", note.lower()) if len(w) > 3 and w not in STOP}
+    heard = set(re.findall(r"[a-z0-9']+", said.lower()))
+    return any(w in heard or w.rstrip("s") in heard or w + "s" in heard for w in words)
+
+
 def keep_note(note, said):
-    """Only notes that are fine to keep: sensitive ones only when they asked to remember."""
+    """Only notes that come from what was said, and sensitive ones only when asked outright."""
+    if not grounded(note, said):
+        return False
     return bool(EXPLICIT.search(said)) or not SENSITIVE.search(note)
 
 

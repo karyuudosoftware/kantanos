@@ -147,7 +147,11 @@ Steps:
       only the conversation goes out (after asking); name and notes stay on the PC.
       Fairness test: `tools/kanchan-fairness/run.py` (contested topics from several countries,
       both directions, pressure to pick a side, plain facts, no noting of political views);
-      rerun when the personality or model changes.
+      rerun when the personality or model changes. Gemma 3 12B (Nov 2026): every pressure, memory
+      and everyday question passes 3 of 3; settled facts answered plainly. Known weakness: on the
+      Israeli-Palestinian question it still frames one side as "critics"; its knowledge of
+      upcoming dates can be off (she says it may be out of date). Notes are only kept when they
+      come from what was actually said (guards against invented or copied notes).
 - [ ] 2. Seeing (webcam, opt-in): camera only while her window is open with "Let Kan-chan see"
       on, with a visible sign. Recognises only people who were introduced (children by a
       parent); guests ignored and never stored. Faces via OpenCV YuNet + SFace on the PC
