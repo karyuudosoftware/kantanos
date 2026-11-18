@@ -163,6 +163,13 @@ Steps:
 - [ ] 4. Online look-ups with ask-first; gentle daily check-in; desktop buddy.
 - [ ] 5. Make your own character: design, personality, voice (character packs already work).
 
+- [ ] Idea, later: a "Kan-chan model". Fine-tune an open model (LoRA on Gemma/Qwen/Mistral,
+      overnight on the RTX 4080) with reviewed example conversations: each side in its own
+      terms, same words for every side, facts stated plainly, and how different parts of the
+      world see each contested topic. A region setting only picks which local context comes
+      first (laws, elections, examples), never which side she leans to. Checked with the
+      fairness test (plus a "several parts of the world, each fairly" check) before shipping.
+
 - [ ] AI-made shortcuts on the "What would you like to do?" screen.
 - [ ] Accessibility: screen reader plus an AI voice helper that reads and handles email and
       the day's agenda, always asking before it sends or deletes anything.
