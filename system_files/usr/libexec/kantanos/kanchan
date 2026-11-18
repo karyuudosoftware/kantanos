@@ -495,6 +495,9 @@ class Companion(QWidget):
             H.save(self.cfg)
             self.offer_voice()
 
+    def last_said(self):
+        return next((m["content"] for m in reversed(self.chat) if m["role"] == "user"), "")
+
     def quiet(self):
         """Nobody's talking: fine for her to bring something up herself."""
         return (self.said_hello and not self.thinking and not self.ears.recording()
@@ -588,6 +591,8 @@ class Companion(QWidget):
                 self.small(f"Forgot: {note['text']}")
         if ans.get("helper"):
             self.helper_card(said)
+        if ans.get("lookup"):
+            self.lookup_card(ans["lookup"], said)
         self.mood("happy")
         QTimer.singleShot(2500, lambda: self.mood("idle"))
         self.say(reply)
@@ -630,6 +635,42 @@ class Companion(QWidget):
         h.addWidget(b)
         h.addStretch()
         self.results_lay.addWidget(row)
+
+    def lookup_card(self, look, said):
+        """She'd like to look something up: show exactly what would go online, and ask."""
+        query = H.redact(look["query"])
+        where = {"weather": "the Open-Meteo weather service", "facts": "Wikipedia",
+                 "web": "DuckDuckGo"}[look["kind"]]
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(8, 0, 0, 0)
+        label = QLabel(f"🔎 Look this up online? I'd ask {where} for “{query}”. Nothing else is sent.")
+        label.setWordWrap(True)
+        label.setStyleSheet("color: palette(placeholder-text);")
+        h.addWidget(label, 1)
+        yes = QPushButton(QIcon.fromTheme("edit-find"), "Look it up")
+        no = QPushButton("No thanks")
+        h.addWidget(yes)
+        h.addWidget(no)
+
+        def go():
+            yes.hide()
+            no.hide()
+            label.setText(f"🔎 Looking up “{query}” on {where}…")
+            self.mood("think")
+            self.thinking = True
+            lang = "ja" if H.has_japanese(said) else "en"
+            self.in_thread("lookup", lambda: (query, brain.lookup(look["kind"], query, lang)))
+
+        def skip():
+            yes.hide()
+            no.hide()
+            label.setText(f"Not looked up: “{query}”")
+            self.answer({"reply": "Okay, no problem!"}, keep=True)
+        yes.clicked.connect(go)
+        no.clicked.connect(skip)
+        self.results_lay.addWidget(row)
+        self.scroll_down()
 
     def bubble(self, text, mine):
         row = QWidget()
@@ -1046,6 +1087,29 @@ class Companion(QWidget):
                 value["remember"], value["forget"] = [], []
                 self.answer(value)
             return
+        if name == "lookup":
+            query, found = value if kind == "ok" else ("", None)
+            ep, private = self.ai()
+            if kind != "ok" or not ep:
+                self.thinking = False
+                self.mood("worried")
+                self.status.setText("I couldn't reach the internet just now." if kind != "ok" else "")
+                return
+            if found and found.get("url"):
+                self.small(f"Source: {found['source']}  ({found['url']})")
+            elif found:
+                self.small(f"Source: {found['source']}")
+            self.in_thread("looked", self.run_ai, ep, self.messages(private is True, brain.lookup_turn(found, query, self.last_said())))
+            return
+        if name == "looked":
+            self.thinking = False
+            if kind == "ok":
+                value.update(remember=[], forget=[], lookup=None)     # no chains of look-ups
+                self.answer(value)
+            else:
+                self.mood("worried")
+                self.status.setText(f"The AI didn't answer ({value[:120]}).")
+            return
         if name == "eye-open":
             if kind == "ok" and value:
                 self.avatar_size(True)
@@ -1135,6 +1199,8 @@ def self_test():
     assert m.get(a)["kind"] == "note" and m.add("Going to Osaka on 12 December") and len(m.all()) == 2
     assert brain.quick_intent("remember that the cat is called Sora") == ("remember", "the cat is called Sora")
     assert brain.parse('{"reply": "Hi", "forget": [1, 99]}', m.all())["forget"] == [1]
+    assert brain.parse('{"reply": "x", "lookup": {"kind": "weather", "query": "Osaka"}}')["lookup"]["query"] == "Osaka"
+    assert brain.parse('{"reply": "x", "lookup": {"kind": "shell", "query": "ls"}}')["lookup"] is None
     assert not brain.keep_note("Votes for the Green party", "I vote Green")
     assert "impartial" in brain.personality("Kan-chan", "Sam")
     acts = brain.Activity(m.db)

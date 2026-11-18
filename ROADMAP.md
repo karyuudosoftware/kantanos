@@ -178,7 +178,17 @@ Steps:
       never commenting on how long. Tested in the VM with a fake Steam game and a fake MPRIS
       player: both noticed, Proton skipped, and asked for ideas she suggested "a new run" of the
       game. Not yet: Heroic games (no reliable game name in the process), a real Steam library.
-- [ ] 4. Online look-ups with ask-first; gentle daily check-in; desktop buddy.
+- [~] 4. Online look-ups with ask-first; gentle daily check-in; desktop buddy.
+      Look-ups done: she sets "lookup" (weather / facts / web) and a card shows exactly what
+      would go online ("I'd ask the Open-Meteo weather service for “Osaka”. Nothing else is
+      sent.") with Look it up / No thanks. Sources need no account: Open-Meteo (weather, town
+      from her notes), Wikipedia (title match first, en/ja), DuckDuckGo instant answers. The
+      results go back to her as DATA and she answers with the source. Her reply before a
+      look-up is a fixed "Let me check that online for you" (she used to guess first); a
+      forecast is cut to the day asked about. Tested with Gemma 3 12B: weather (EN and JA,
+      3 of 3 right), Mount Fuji, no look-up for everyday questions; in the VM end to end.
+      Weak: recent events (instant answers rarely cover news). Still to do: daily check-in,
+      desktop buddy.
 - [ ] 5. Make your own character: design, personality, voice (character packs already work).
 
 - [ ] Idea, later: a "Kan-chan model". Fine-tune an open model (LoRA on Gemma/Qwen/Mistral,
