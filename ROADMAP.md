@@ -187,8 +187,12 @@ Steps:
       look-up is a fixed "Let me check that online for you" (she used to guess first); a
       forecast is cut to the day asked about. Tested with Gemma 3 12B: weather (EN and JA,
       3 of 3 right), Mount Fuji, no look-up for everyday questions; in the VM end to end.
-      Weak: recent events (instant answers rarely cover news). Still to do: daily check-in,
-      desktop buddy.
+      Weak: recent events (instant answers rarely cover news).
+      Daily hello done: "Say hello each day" in her window puts `kanchan --check-in` in the
+      person's autostart; once a day at login a notification (30 s) says hello, with a
+      reminder when a plan note is dated today or tomorrow ("19 November", "November 19th",
+      "11月19日"), and "Talk to Kan-chan" opens her window carrying on from it. No AI needed.
+      Tested in the VM. Still to do: desktop buddy.
 - [ ] 5. Make your own character: design, personality, voice (character packs already work).
 
 - [ ] Idea, later: a "Kan-chan model". Fine-tune an open model (LoRA on Gemma/Qwen/Mistral,

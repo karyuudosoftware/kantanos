@@ -214,6 +214,37 @@ def personality(name="Kan-chan", person="", now=None):
         return f.read().format(name=name, person=person or "the person", now=now_text(now), calendar=calendar(now))
 
 
+def due_plans(notes, now=None):
+    """Plan notes whose date is today or tomorrow: [(note, "today" | "tomorrow")]."""
+    now = now or datetime.datetime.now()
+    due = []
+    for n in notes:
+        if n.get("kind") != "plan":
+            continue
+        text = n["text"].lower()
+        for offset, word in ((0, "today"), (1, "tomorrow")):
+            d = now + datetime.timedelta(days=offset)
+            month = d.strftime("%B").lower()
+            forms = (rf"\b{d.day}(st|nd|rd|th)? (of )?{month}\b", rf"\b{month} {d.day}(st|nd|rd|th)?\b",
+                     rf"(?<!\d){d.month}月{d.day}日")
+            if any(re.search(f, text) for f in forms):
+                due.append((n, word))
+                break
+    return sorted(due, key=lambda d: d[1] != "today")
+
+
+def check_in_text(person, notes, now=None):
+    """The once-a-day hello (no AI needed): a plan for today or tomorrow if there is one."""
+    now = now or datetime.datetime.now()
+    greet = {"morning": "Good morning", "afternoon": "Hi", "evening": "Good evening", "night": "Hi"}[part_of_day(now)]
+    hello = f"{greet}{', ' + person if person else ''}!"
+    due = due_plans(notes, now)
+    if due:
+        note, when = due[0]
+        return f"{hello} Just a reminder for {when}: {note['text']}."
+    return f"{hello} I'm here if you'd like a chat."
+
+
 def build_messages(name, person, notes, history, now=None):
     """notes: Memory.all() (or [] when talking to an online AI: notes never leave the PC)."""
     system = personality(name, person, now)

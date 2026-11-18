@@ -13,6 +13,7 @@ separately in "What I remember") and ask how they're going.
   kanchan            open her window
   kanchan --enable   put her in the app menu (Welcome does this), then open
   kanchan --disable  take her out of the app menu again (notes are kept)
+  kanchan --check-in the once-a-day hello at login (only when "Say hello each day" is on)
 """
 import importlib.machinery
 import importlib.util
@@ -49,6 +50,8 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QDialogButtonBo
 
 TITLE = "Kan-chan"
 DESKTOP = "kantanos-kanchan.desktop"
+AUTOSTART = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.join(H.HOME, ".config")), "autostart",
+                         "kantanos-kanchan-checkin.desktop")
 NOTICE_UNIT = "kantanos-kanchan-notice.service"
 # Only for testing with an AI on another PC of your own (the build PC): treat it like the AI on
 # this PC, so notes, names and seeing work. Never set on a family PC.
@@ -71,6 +74,43 @@ def set_in_menu(on):
     with open(path, "w", encoding="utf-8") as f:
         f.write(re.sub(r"(?m)^NoDisplay=true\n", "", text))
     subprocess.run(["kbuildsycoca6"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def set_check_in(on):
+    """The daily hello runs at login from the person's own autostart folder (only when on)."""
+    if not on:
+        try:
+            os.remove(AUTOSTART)
+        except OSError:
+            pass
+        return
+    os.makedirs(os.path.dirname(AUTOSTART), exist_ok=True)
+    with open(AUTOSTART, "w", encoding="utf-8") as f:
+        f.write("[Desktop Entry]\nType=Application\nName=Kan-chan daily hello\n"
+                "Exec=/usr/libexec/kantanos/kanchan --check-in\nIcon=kantanos-kanchan\n"
+                "NoDisplay=true\nX-KDE-autostart-phase=2\n")
+
+
+def check_in():
+    """Once a day, a short hello as a notification; a plan for today or tomorrow if there is one."""
+    import datetime
+    cfg = H.load()
+    if not cfg.get("kanchan_checkin"):
+        return
+    today = datetime.date.today().isoformat()
+    if cfg.get("kanchan_checkin_day") == today:
+        return
+    cfg["kanchan_checkin_day"] = today
+    H.save(cfg)
+    time.sleep(int(os.environ.get("KANTAN_CHECKIN_DELAY", "20")))      # let the desktop settle
+    me = H.load_me()
+    mem = brain.Memory(os.environ.get("KANTAN_KANCHAN_DB", brain.DB))
+    text = brain.check_in_text(me.get("name", ""), mem.all())
+    out = subprocess.run(["notify-send", "-a", TITLE, "-i", "kantanos-kanchan", "-t", "30000", "-A", "talk=Talk to Kan-chan",
+                          TITLE, text], capture_output=True, text=True).stdout.strip()
+    if out == "talk":            # become her window (a child process could be cleaned up with this one)
+        os.environ["KANTAN_KANCHAN_HELLO"] = text            # she carries on from her hello
+        os.execv(sys.executable, [sys.executable, os.path.abspath(__file__)])
 
 
 class Remembered(QDialog):
@@ -318,6 +358,12 @@ class Companion(QWidget):
         self.talk.setChecked(self.cfg.get("kanchan_voice", True))
         self.talk.toggled.connect(self.voice_toggled)
         side.addWidget(self.talk, 0, Qt.AlignHCenter)
+        self.hello_daily = QCheckBox("Say hello each day")
+        self.hello_daily.setToolTip("Once a day when you log in I'll pop up with a short hello, and a reminder "
+                                    "if one of your plans is today or tomorrow.")
+        self.hello_daily.setChecked(bool(self.cfg.get("kanchan_checkin")))
+        self.hello_daily.toggled.connect(self.check_in_toggled)
+        side.addWidget(self.hello_daily, 0, Qt.AlignHCenter)
         self.see = QCheckBox("Let me see (webcam)")
         self.see.setToolTip("While this window is open I can see through the webcam: I recognise people you "
                             "introduce to me and notice things like a new haircut. It all happens on this PC "
@@ -464,6 +510,10 @@ class Companion(QWidget):
             QTimer.singleShot(400, self.hello)
             return
         self.said_hello = True
+        said = os.environ.pop("KANTAN_KANCHAN_HELLO", "")
+        if said:                                   # opened from her daily hello
+            self.answer({"reply": said}, keep=True)
+            return
         name = self.me.get("name")
         greet = {"morning": "Good morning", "afternoon": "Hi", "evening": "Good evening",
                  "night": "Hi"}[brain.part_of_day()]
@@ -745,6 +795,11 @@ class Companion(QWidget):
         self.talk_btn.setEnabled(False)
         self.status.setText("Listening back…")
         self.in_thread("stt", self.ears.transcribe, path, self.me)
+
+    def check_in_toggled(self, on):
+        self.cfg["kanchan_checkin"] = on
+        H.save(self.cfg)
+        set_check_in(on)
 
     def voice_toggled(self, on):
         self.cfg["kanchan_voice"] = on
@@ -1203,6 +1258,10 @@ def self_test():
     assert brain.parse('{"reply": "x", "lookup": {"kind": "shell", "query": "ls"}}')["lookup"] is None
     assert not brain.keep_note("Votes for the Green party", "I vote Green")
     assert "impartial" in brain.personality("Kan-chan", "Sam")
+    import datetime
+    soon = datetime.datetime.now() + datetime.timedelta(days=1)
+    plan = m.get(m.add(f"Dentist on {soon.day} {soon.strftime('%B')}"))
+    assert brain.due_plans([plan]) == [(plan, "tomorrow")] and "Dentist" in brain.check_in_text("Sam", [plan])
     acts = brain.Activity(m.db)
     acts.add("game", "Test Game", 30)
     assert "Test Game" in brain.activity_text(acts.recent(), "Sam")
@@ -1227,8 +1286,11 @@ def self_test():
 def main():
     if "--self-test" in sys.argv:
         return self_test()
+    if "--check-in" in sys.argv:
+        return check_in()
     if "--disable" in sys.argv:
         set_in_menu(False)
+        set_check_in(False)
         return
     if "--enable" in sys.argv:
         set_in_menu(True)
