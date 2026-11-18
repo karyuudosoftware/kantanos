@@ -147,6 +147,8 @@ doc += screen("Tools", "Disk space and system helpers", "".join([
            "nohup setsid /usr/libexec/kantanos/force-quit >&/dev/null"),
     action("helper", "Something not working? Ask the KantanOS Helper", "Looks at what went wrong, explains it in plain words and offers safe fixes, asking before each one. Its AI runs on this PC (set it up once in AI settings) or, if you choose, an online service.",
            "nohup setsid /usr/libexec/kantanos/helper >&/dev/null"),
+    action("kanchan", "Meet Kan-chan, your PC companion", "Chat with Kan-chan by talking or typing. She remembers what you tell her (you can see, change or delete it all in \"What I remember\"), suggests what to cook and keeps you company. Everything stays on this PC. Adds her to the app menu.",
+           "nohup setsid /usr/libexec/kantanos/kanchan --enable >&/dev/null"),
     action("claudecode", "Install Claude Code", "Claude's coding assistant for the terminal, from Anthropic's official installer. Needs a Claude account. It goes into your home folder, so updates to KantanOS don't affect it.",
            f"curl -fsSL https://claude.ai/install.sh | bash; {PAUSE}"),
     action("virusscan", "Scan Downloads for viruses", "Checks your Downloads folder with ClamAV. To check anything else, right-click it in Files and choose Scan for viruses.",

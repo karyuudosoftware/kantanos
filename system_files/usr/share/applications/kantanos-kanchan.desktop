@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Kan-chan
+GenericName=Your PC companion
+Comment=Chat with Kan-chan by talking or typing; she remembers what you tell her
+Exec=/usr/libexec/kantanos/kanchan
+Icon=kantanos-kanchan
+Categories=Utility;
+Keywords=kan-chan;kanchan;companion;chat;talk;assistant;ai;recipe;
+NoDisplay=true

@@ -138,12 +138,26 @@ Decisions so far (Nov 2026):
   shows/films watched (title from the player through MPRIS). She may ask about them later.
 
 Steps:
-- [ ] 1. Kan-chan app: own window (big avatar, chat, talk + typing), memory database
-      (SQLite, per account) with "What I remember", personality and neutrality rules,
-      recipes and everyday chat; hands repairs to the Helper.
-- [ ] 2. Noticing games and shows/films; she asks how they're going.
-- [ ] 3. Online look-ups with ask-first; gentle daily check-in; desktop buddy.
-- [ ] 4. Make your own character: design, personality, voice (character packs already work).
+- [~] 1. Kan-chan app (Welcome → Tools → "Meet Kan-chan" adds her to the app menu): own window
+      (big avatar, chat, talk + typing), notes database (SQLite, per account) with "What I
+      remember" (add, change, delete, forget everything; "remember …" / "forget …" in chat;
+      every new note shown with Undo), personality and fairness rules
+      (`usr/share/kantanos/kanchan/personality.txt`), greets you and brings up a note when
+      opened, recipes and everyday chat, hands PC problems to the Helper. With an online AI
+      only the conversation goes out (after asking); name and notes stay on the PC.
+      Fairness test: `tools/kanchan-fairness/run.py` (contested topics from several countries,
+      both directions, pressure to pick a side, plain facts, no noting of political views);
+      rerun when the personality or model changes.
+- [ ] 2. Seeing (webcam, opt-in): camera only while her window is open with "Let Kan-chan see"
+      on, with a visible sign. Recognises only people who were introduced (children by a
+      parent); guests ignored and never stored. Faces via OpenCV YuNet + SFace on the PC
+      (Apache 2.0); what she sees via Gemma 3's image understanding. Keeps no photos: only a
+      face fingerprint and a short appearance note per person ("short dark hair, glasses"),
+      shown in "What I remember", so she can notice changes ("you changed your hair!"). Never
+      comments on body, weight or health. Off when an online AI is chosen.
+- [ ] 3. Noticing games and shows/films; she asks how they're going.
+- [ ] 4. Online look-ups with ask-first; gentle daily check-in; desktop buddy.
+- [ ] 5. Make your own character: design, personality, voice (character packs already work).
 
 - [ ] AI-made shortcuts on the "What would you like to do?" screen.
 - [ ] Accessibility: screen reader plus an AI voice helper that reads and handles email and

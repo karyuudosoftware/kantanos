@@ -1,0 +1,708 @@
+#!/usr/bin/python3
+"""Kan-chan: the KantanOS companion.
+
+A character who lives on the PC: chat by talking or typing, she keeps notes about you (in a
+database in your home folder, all visible and editable in "What I remember"), brings things
+up, helps with everyday things like what to cook, and hands PC problems to the KantanOS
+Helper. Her voice, ears, name and AI settings are shared with the Helper.
+
+  kanchan            open her window
+  kanchan --enable   put her in the app menu (Welcome does this), then open
+  kanchan --disable  take her out of the app menu again (notes are kept)
+"""
+import importlib.machinery
+import importlib.util
+import os
+import re
+import subprocess
+import sys
+import threading
+import time
+import urllib.parse
+
+sys.path.insert(0, "/usr/share/kantanos/kanchan")
+import brain  # noqa: E402
+
+HELPER = "/usr/libexec/kantanos/helper"
+
+
+def load_helper():
+    loader = importlib.machinery.SourceFileLoader("kantanos_helper", os.environ.get("KANTAN_HELPER_PATH", HELPER))
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("kantanos_helper", loader))
+    loader.exec_module(mod)
+    return mod
+
+
+H = load_helper()           # Voice, Ears, Avatar, NameDialog, Settings, AI settings and more
+
+from PySide6.QtCore import Qt, QTimer  # noqa: E402
+from PySide6.QtGui import QFont, QIcon  # noqa: E402
+from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QDialogButtonBox, QFrame,  # noqa: E402
+                               QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
+                               QListWidgetItem, QMessageBox, QProgressBar, QPushButton, QScrollArea,
+                               QVBoxLayout, QWidget)
+
+TITLE = "Kan-chan"
+DESKTOP = "kantanos-kanchan.desktop"
+USER_APPS = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.join(H.HOME, ".local", "share")), "applications")
+
+
+def set_in_menu(on):
+    """The app menu entry is hidden until someone switches her on (Welcome)."""
+    path = os.path.join(USER_APPS, DESKTOP)
+    if not on:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return
+    with open("/usr/share/applications/" + DESKTOP, encoding="utf-8") as f:
+        text = f.read()
+    os.makedirs(USER_APPS, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(re.sub(r"(?m)^NoDisplay=true\n", "", text))
+    subprocess.run(["kbuildsycoca6"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+class Remembered(QDialog):
+    """What I remember: every note, which you can add to, change or delete."""
+
+    def __init__(self, parent, memory, person):
+        super().__init__(parent)
+        self.mem = memory
+        self.setWindowTitle("What I remember")
+        self.resize(560, 480)
+        lay = QVBoxLayout(self)
+        about = QLabel(f"Everything I keep about {person or 'you'} is here, and only on this PC. Change or "
+                       "delete anything; you can also just tell me “remember …” or “forget …”.")
+        about.setWordWrap(True)
+        lay.addWidget(about)
+        self.list = QListWidget()
+        self.list.itemDoubleClicked.connect(lambda _: self.edit())
+        lay.addWidget(self.list, 1)
+        row = QHBoxLayout()
+        for text, icon, fn in (("Add…", "list-add", self.add), ("Change…", "document-edit", self.edit),
+                               ("Delete", "edit-delete", self.delete)):
+            b = QPushButton(QIcon.fromTheme(icon), text)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        row.addStretch()
+        wipe = QPushButton(QIcon.fromTheme("edit-clear-all"), "Forget everything…")
+        wipe.clicked.connect(self.wipe)
+        row.addWidget(wipe)
+        lay.addLayout(row)
+        close = QDialogButtonBox(QDialogButtonBox.Close)
+        close.rejected.connect(self.reject)
+        lay.addWidget(close)
+        self.fill()
+
+    def fill(self):
+        self.list.clear()
+        notes = self.mem.all()
+        for n in notes:
+            when = n["created"][:10]
+            item = QListWidgetItem(f"{n['text']}    ({'plan, ' if n['kind'] == 'plan' else ''}{when})")
+            item.setData(Qt.UserRole, n["id"])
+            self.list.addItem(item)
+        if not notes:
+            item = QListWidgetItem("Nothing yet. Tell me about yourself!")
+            item.setFlags(Qt.NoItemFlags)
+            self.list.addItem(item)
+
+    def current(self):
+        item = self.list.currentItem()
+        return item.data(Qt.UserRole) if item else None
+
+    def add(self):
+        text, ok = QInputDialog.getText(self, "Add a note", "What should I remember?")
+        if ok and text.strip():
+            self.mem.add(text)
+            self.fill()
+
+    def edit(self):
+        nid = self.current()
+        note = self.mem.get(nid) if nid else None
+        if not note:
+            return
+        text, ok = QInputDialog.getText(self, "Change a note", "Note:", text=note["text"])
+        if ok and text.strip():
+            self.mem.update(nid, text)
+            self.fill()
+
+    def delete(self):
+        nid = self.current()
+        if nid:
+            self.mem.delete(nid)
+            self.fill()
+
+    def wipe(self):
+        if QMessageBox.question(self, TITLE, "Forget everything I've noted? This can't be undone.",
+                                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes:
+            self.mem.clear()
+            self.fill()
+
+
+class Companion(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.cfg = H.load()
+        self.me = H.load_me()
+        self.mem = brain.Memory(os.environ.get("KANTAN_KANCHAN_DB", brain.DB))
+        self.bridge = H.Bridge()
+        self.bridge.done.connect(self.on_done)
+        self.bridge.progress.connect(self.on_progress)
+        self.chat = []                     # this conversation (kept only while the window is open)
+        self.online_ok = False
+        self.name_dialog = None
+        self.listen_started, self.listen_toggle = 0.0, False
+        self.setWindowTitle(TITLE)
+        self.setWindowIcon(QIcon.fromTheme("kantanos-kanchan", QIcon.fromTheme("face-smile")))
+        self.resize(980, 700)
+
+        pack = H.character_dir(self.cfg.get("character", "kan-chan"))
+        info = {}
+        if pack:
+            try:
+                info = H.json.load(open(os.path.join(pack, "character.json"), encoding="utf-8"))
+            except (OSError, ValueError):
+                pass
+        self.char_name = info.get("name", TITLE)
+        self.voice = H.Voice(self.cfg.get("voice") or info.get("voice", "en_US-hfc_female-medium"))
+        self.ears = H.Ears()
+
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(20, 20, 20, 20)
+        outer.setSpacing(20)
+
+        # left: Kan-chan herself
+        side = QVBoxLayout()
+        self.avatar = H.Avatar(pack) if pack else QLabel()
+        if pack:
+            self.avatar.setFixedSize(264, 330)
+        side.addWidget(self.avatar, 0, Qt.AlignHCenter)
+        name = QLabel(self.char_name)
+        f = QFont(); f.setPointSizeF(f.pointSizeF() * 1.7); f.setBold(True)
+        name.setFont(f)
+        name.setAlignment(Qt.AlignHCenter)
+        side.addWidget(name)
+        self.name_btn = QPushButton()
+        self.name_btn.setFlat(True)
+        self.name_btn.setStyleSheet("color: palette(link);")
+        self.name_btn.setCursor(Qt.PointingHandCursor)
+        self.name_btn.clicked.connect(self.ask_name)
+        side.addWidget(self.name_btn, 0, Qt.AlignHCenter)
+        self.talk = QCheckBox("Talk out loud")
+        self.talk.setChecked(self.cfg.get("kanchan_voice", True))
+        self.talk.toggled.connect(self.voice_toggled)
+        side.addWidget(self.talk, 0, Qt.AlignHCenter)
+        side.addSpacing(10)
+        for text, icon, fn in (("What I remember", "view-list-details", self.open_memory),
+                               ("AI settings", "configure", self.open_settings)):
+            b = QPushButton(QIcon.fromTheme(icon), text)
+            b.clicked.connect(fn)
+            side.addWidget(b)
+        side.addStretch()
+        self.ai_label = QLabel()
+        self.ai_label.setWordWrap(True)
+        self.ai_label.setAlignment(Qt.AlignHCenter)
+        self.ai_label.setStyleSheet("color: palette(placeholder-text);")
+        side.addWidget(self.ai_label)
+        outer.addLayout(side)
+
+        # right: the conversation
+        right = QVBoxLayout()
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.results = QWidget()
+        self.results_lay = QVBoxLayout(self.results)
+        self.results_lay.setAlignment(Qt.AlignTop)
+        self.scroll.setWidget(self.results)
+        right.addWidget(self.scroll, 1)
+        self.bar = QProgressBar()
+        self.bar.hide()
+        right.addWidget(self.bar)
+        self.status = QLabel()
+        self.status.setWordWrap(True)
+        self.status.setStyleSheet("color: palette(placeholder-text);")
+        right.addWidget(self.status)
+        row = QHBoxLayout()
+        self.entry = QLineEdit()
+        self.entry.setPlaceholderText(f"Type to {self.char_name}…")
+        self.entry.returnPressed.connect(self.typed)
+        row.addWidget(self.entry, 1)
+        send = QPushButton(QIcon.fromTheme("document-send"), "Send")
+        send.clicked.connect(self.typed)
+        row.addWidget(send)
+        self.talk_btn = QPushButton(QIcon.fromTheme("audio-input-microphone"), "Hold to talk")
+        self.talk_btn.setToolTip("Hold and talk; let go when you're done. Or click once to start and again "
+                                 "to stop. What you say is understood on this PC and not kept.")
+        self.talk_btn.pressed.connect(self.talk_pressed)
+        self.talk_btn.released.connect(self.talk_released)
+        self.talk_btn.setVisible(H.Ears.available())
+        row.addWidget(self.talk_btn)
+        right.addLayout(row)
+        outer.addLayout(right, 1)
+
+        self.listen_limit = QTimer(self, singleShot=True, interval=H.LISTEN_MAX * 1000, timeout=self.stop_listening)
+        self.speech = QTimer(self, interval=40, timeout=self.mouth_step)
+        self.levels, self.level_i = [], 0
+        self.show_name()
+        self.show_ai()
+        QTimer.singleShot(400, self.hello)
+
+    # ---- the AI --------------------------------------------------------------------------
+    def ai(self):
+        """(endpoint, private) or (None, why): private means the AI runs on this PC."""
+        ep = brain.endpoint(self.cfg, H.local_model()[0])
+        if ep["kind"] == "openai":
+            return ep, False
+        if not H.ollama_up() or not H.local_ready(ep["model"]):
+            return None, "local-missing"
+        return ep, True
+
+    def show_ai(self):
+        if self.cfg.get("provider") == "online" and self.cfg.get("online_url"):
+            host = urllib.parse.urlparse(self.cfg["online_url"]).hostname or "online"
+            self.ai_label.setText(f"AI: {host} (online). Your notes stay on this PC.")
+        else:
+            self.ai_label.setText("AI: on this PC (private)")
+
+    def ask_online(self):
+        if self.online_ok:
+            return True
+        host = urllib.parse.urlparse(self.cfg["online_url"]).hostname
+        box = QMessageBox(self)
+        box.setWindowTitle(TITLE)
+        box.setIcon(QMessageBox.Question)
+        box.setText(f"Send our conversation to {host}?")
+        box.setInformativeText("Your AI settings use an online service. What you say in this window goes "
+                               "there, with personal details removed. Your name and my notes about you "
+                               "stay on this PC. I'll ask again next time.")
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        box.button(QMessageBox.Yes).setText("Send")
+        box.button(QMessageBox.No).setText("Don't send")
+        self.online_ok = box.exec() == QMessageBox.Yes
+        return self.online_ok
+
+    def messages(self, private, extra=None):
+        notes = self.mem.all() if private else []
+        person = self.me.get("name", "") if private else ""
+        history = self.chat if private else [{"role": m["role"], "content": H.redact(m["content"])}
+                                             for m in self.chat]
+        return brain.build_messages(self.char_name, person, notes, history + ([extra] if extra else []))
+
+    def hello(self):
+        name = self.me.get("name")
+        greet = {"morning": "Good morning", "afternoon": "Hi", "evening": "Good evening",
+                 "night": "Hi"}[brain.part_of_day()]
+        ep, private = self.ai()
+        if ep and private and self.mem.all():
+            self.mood("think")
+            self.in_thread("opener", self.run_ai, ep, self.messages(True, brain.opener_turn(name)))
+            return
+        if not name:
+            text = (f"{greet}! I'm {self.char_name}. I live on this PC and I'd love to get to know you. "
+                    "What should I call you?")
+        else:
+            text = f"{greet}, {name}! What's on your mind?"
+        self.answer({"reply": text}, keep=True)
+        QTimer.singleShot(900, self.first_steps)
+        if not ep and not self.cfg.get("provider") == "online":
+            self.status.setText("Tip: set up the AI in AI settings so we can really chat. Until then I can "
+                                "still remember things you tell me (“remember …”).")
+
+    def first_steps(self):
+        """First visit: introductions, then her voice (one question at a time)."""
+        if not self.me.get("name") and not self.cfg.get("kanchan_name_asked"):
+            self.cfg["kanchan_name_asked"] = True
+            H.save(self.cfg)
+            self.ask_name()
+        if self.talk.isChecked() and not self.voice.ready() and not self.cfg.get("kanchan_voice_asked"):
+            self.cfg["kanchan_voice_asked"] = True
+            H.save(self.cfg)
+            self.offer_voice()
+
+    @staticmethod
+    def run_ai(ep, msgs):
+        return brain.parse(brain.complete(ep, msgs))
+
+    # ---- what you say ----------------------------------------------------------------------
+    def typed(self):
+        text = self.entry.text().strip()
+        if text:
+            self.entry.clear()
+            self.said(text)
+
+    def said(self, text):
+        self.bubble(text, True)
+        self.chat.append({"role": "user", "content": text})
+        intent = brain.quick_intent(text)
+        if intent and intent[0] == "list":
+            self.open_memory()
+        ep, private = self.ai()
+        if ep and not private and not self.ask_online():
+            ep = None
+        if not ep:
+            return self.without_ai(text, intent)
+        self.mood("think")
+        self.status.setText(f"{self.char_name} is thinking…")
+        self.in_thread("chat", self.run_ai, ep, self.messages(private))
+
+    def without_ai(self, text, intent):
+        if intent and intent[0] == "remember":
+            self.note(self.mem.add(intent[1]))
+            return self.answer({"reply": "Got it, I'll remember that."}, keep=False)
+        if intent and intent[0] == "forget":
+            hits = self.mem.find(intent[1])
+            for nid in hits:
+                note = self.mem.get(nid)
+                self.mem.delete(nid)
+                self.small(f"Forgot: {note['text']}")
+            return self.answer({"reply": "Done, I've forgotten that." if hits else
+                                "I couldn't find that in my notes. Have a look in “What I remember”."}, keep=False)
+        if intent and intent[0] == "list":
+            return self.answer({"reply": "Here's everything I remember."}, keep=False)
+        reply = ("I can't chat properly yet: the AI on this PC isn't set up. Open AI settings and press "
+                 "“Set up”, and then we can talk about anything.")
+        self.answer({"reply": reply}, keep=False)
+
+    def answer(self, ans, keep=True, said=""):
+        self.status.setText("")
+        reply = ans.get("reply") or "Hmm, I'm not sure what to say. Could you put it another way?"
+        self.bubble(reply, False)
+        if keep:
+            self.chat.append({"role": "assistant", "content": reply})
+        notes = list(ans.get("remember", []))
+        intent = brain.quick_intent(said) if said else None
+        if intent and intent[0] == "remember" and not notes:
+            notes = [intent[1]]                      # asked outright: kept even if the AI forgot to
+        for note in notes:
+            if brain.keep_note(note, said):
+                self.note(self.mem.add(note))
+        for nid in ans.get("forget", []):
+            note = self.mem.get(nid)
+            if note:
+                self.mem.delete(nid)
+                self.small(f"Forgot: {note['text']}")
+        if ans.get("helper"):
+            self.helper_card(said)
+        self.mood("happy")
+        QTimer.singleShot(2500, lambda: self.mood("idle"))
+        self.say(reply)
+
+    def note(self, nid):
+        note = self.mem.get(nid) if nid else None
+        if not note:
+            return
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(8, 0, 0, 0)
+        label = QLabel(f"📝 Noted: {note['text']}")
+        label.setStyleSheet("color: palette(placeholder-text);")
+        h.addWidget(label)
+        undo = QPushButton("Undo")
+        undo.setFlat(True)
+        undo.setStyleSheet("color: palette(link);")
+
+        def forget():
+            self.mem.delete(nid)
+            label.setText(f"Not noted: {note['text']}")
+            undo.hide()
+        undo.clicked.connect(forget)
+        h.addWidget(undo)
+        h.addStretch()
+        self.results_lay.addWidget(row)
+        self.scroll_down()
+
+    def small(self, text):
+        label = QLabel(text)
+        label.setStyleSheet("color: palette(placeholder-text); margin-left: 8px;")
+        self.results_lay.addWidget(label)
+
+    def helper_card(self, said):
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(8, 0, 0, 0)
+        b = QPushButton(QIcon.fromTheme("help-browser"), "Open the KantanOS Helper")
+        b.clicked.connect(lambda: subprocess.Popen([HELPER] + ([said] if said else []), start_new_session=True))
+        h.addWidget(b)
+        h.addStretch()
+        self.results_lay.addWidget(row)
+
+    def bubble(self, text, mine):
+        row = QWidget()
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 2, 0, 2)
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        label.setMaximumWidth(520)
+        label.setStyleSheet("QLabel { border-radius: 12px; padding: 8px 12px; background: "
+                            + ("palette(highlight); color: palette(highlighted-text);" if mine
+                               else "palette(alternate-base);") + " }")
+        if mine:
+            h.addStretch()
+        h.addWidget(label)
+        if not mine:
+            h.addStretch()
+        self.results_lay.addWidget(row)
+        self.scroll_down()
+
+    def scroll_down(self):
+        bar = self.scroll.verticalScrollBar()
+        QTimer.singleShot(60, lambda: bar.setValue(bar.maximum()))
+
+    # ---- talking out loud ------------------------------------------------------------------
+    def talk_pressed(self):
+        if self.ears.recording():
+            return
+        self.voice.stop()
+        self.speech.stop()
+        self.avatar_mouth(None)
+        if not self.ears.ready():
+            ok = QMessageBox.question(
+                self, TITLE, f"To understand what you say, I need a speech model: a one-time download of "
+                f"{H.STT_SIZE}. It runs on this PC: your voice is never sent anywhere and recordings aren't "
+                "kept. Download it now?", QMessageBox.Yes | QMessageBox.No)
+            if ok == QMessageBox.Yes:
+                self.talk_btn.setEnabled(False)
+                self.status.setText(f"Downloading the speech model ({H.STT_SIZE})…")
+                self.in_thread("stt-dl", self.ears.download)
+            return
+        try:
+            self.ears.start()
+        except OSError as e:
+            self.status.setText(f"The microphone couldn't be opened ({e}).")
+            return
+        self.listen_started, self.listen_toggle = time.monotonic(), False
+        self.listen_limit.start()
+        self.mood("listen")
+        self.talk_btn.setText("Listening… let go when done")
+
+    def talk_released(self):
+        if not self.ears.recording():
+            return
+        if not self.listen_toggle and time.monotonic() - self.listen_started < 0.45:
+            self.listen_toggle = True
+            self.talk_btn.setText("Listening… click to stop")
+            return
+        self.stop_listening()
+
+    def stop_listening(self):
+        self.listen_limit.stop()
+        if not self.ears.recording():
+            return
+        path = self.ears.stop()
+        self.talk_btn.setText("Hold to talk")
+        if not path:
+            self.mood("worried")
+            self.status.setText("I couldn't hear anything. Is a microphone connected and switched on?")
+            return
+        self.mood("think")
+        self.talk_btn.setEnabled(False)
+        self.status.setText("Listening back…")
+        self.in_thread("stt", self.ears.transcribe, path, self.me)
+
+    def voice_toggled(self, on):
+        self.cfg["kanchan_voice"] = on
+        H.save(self.cfg)
+        if not on:
+            self.voice.stop()
+        elif not self.voice.ready():
+            self.offer_voice()
+
+    def offer_voice(self):
+        ok = QMessageBox.question(self, TITLE, "My voice runs on this PC and needs a one-time download of about "
+                                  "60 MB (from the Piper voice library). Download it now?",
+                                  QMessageBox.Yes | QMessageBox.No)
+        if ok != QMessageBox.Yes:
+            self.talk.setChecked(False)
+            return
+        self.status.setText("Downloading my voice…")
+        self.in_thread("voice-dl", self.voice.download)
+
+    def say(self, text, force=False):
+        text = H.spoken(H.speakable(text or ""), self.me)
+        if not text or not (self.talk.isChecked() or force) or not self.voice.ready():
+            return
+        if H.has_japanese(text) and self.voice.name.startswith("en"):
+            return
+        self.in_thread("voice-synth", self.voice.synthesize, text[:900])
+
+    def avatar_mouth(self, m):
+        if isinstance(self.avatar, H.Avatar):
+            self.avatar.mouth = m
+
+    def mouth_step(self):
+        if self.level_i >= len(self.levels) or (self.voice.player and self.voice.player.poll() is not None):
+            self.speech.stop()
+            self.avatar_mouth(None)
+            return
+        level = self.levels[self.level_i]
+        self.level_i += 1
+        self.avatar_mouth("talk2" if level > 0.45 else "talk1" if level > 0.12 else None)
+
+    def mood(self, name):
+        if isinstance(self.avatar, H.Avatar):
+            self.avatar.set_mood(name)
+
+    # ---- your name, notes, settings ------------------------------------------------------
+    def show_name(self):
+        name = self.me.get("name")
+        self.name_btn.setText(f"I call you {name} (change)" if name else "Tell me your name")
+
+    def ask_name(self):
+        d = self.name_dialog = H.NameDialog(self, self.me)
+        ok = d.exec() == QDialog.Accepted
+        self.name_dialog = None
+        if not ok:
+            return
+        self.me = d.result_me()
+        H.save_me(self.me)
+        self.cfg["name_asked"] = True
+        H.save(self.cfg)
+        self.show_name()
+        if self.me.get("name"):
+            self.answer({"reply": f"Nice to meet you, {self.me['name']}!"}, keep=True)
+
+    def open_memory(self):
+        Remembered(self, self.mem, self.me.get("name")).exec()
+
+    def open_settings(self):
+        d = H.Settings(self, self.cfg)
+        if d.exec() != QDialog.Accepted:
+            return
+        self.cfg = d.result_cfg()
+        H.save(self.cfg)
+        self.show_ai()
+        if d.wants_setup:
+            self.setup_local()
+
+    def setup_local(self):
+        model, size = H.local_model()
+        self.cfg["local_model"] = model
+        H.save(self.cfg)
+        self.bar.show()
+        self.bar.setRange(0, 0)
+        self.status.setText(f"Setting up the AI on this PC: downloading {model} ({size}). This happens once.")
+
+        def work():
+            subprocess.run(["systemctl", "--user", "start", H.OLLAMA_UNIT])
+            for _ in range(30):
+                if H.ollama_up():
+                    break
+                time.sleep(1)
+            else:
+                return "the AI service didn't start"
+            req = H.urllib.request.Request(H.OLLAMA + "/api/pull", data=H.json.dumps({"model": model}).encode(),
+                                           headers={"Content-Type": "application/json"})
+            with H.urllib.request.urlopen(req, timeout=3600) as r:
+                for line in r:
+                    msg = H.json.loads(line)
+                    if msg.get("error"):
+                        return msg["error"]
+                    if msg.get("total"):
+                        self.bridge.progress.emit(int(msg.get("completed", 0) * 100 // msg["total"]),
+                                                  msg.get("status", ""))
+            return True
+        self.in_thread("setup", work)
+
+    def on_progress(self, pct, text):
+        self.bar.setRange(0, 100)
+        self.bar.setValue(pct)
+        self.status.setText(f"Setting up the AI on this PC: {text} ({pct}%)")
+
+    # ---- background work ------------------------------------------------------------------
+    def in_thread(self, name, fn, *args):
+        def work():
+            try:
+                self.bridge.done.emit(name, ("ok", fn(*args)))
+            except Exception as e:  # noqa: BLE001 - shown in plain words
+                self.bridge.done.emit(name, ("error", str(e)))
+        threading.Thread(target=work, daemon=True).start()
+
+    def on_done(self, name, result):
+        kind, value = result
+        if name in ("chat", "opener"):
+            said = self.chat[-1]["content"] if self.chat and self.chat[-1]["role"] == "user" else ""
+            if kind == "ok":
+                self.answer(value, said=said)
+            elif name == "opener":
+                self.answer({"reply": f"Hi{', ' + self.me['name'] if self.me.get('name') else ''}! "
+                                      "What's on your mind?"})
+            else:
+                self.mood("worried")
+                self.status.setText(f"The AI didn't answer ({value[:120]}).")
+        elif name == "stt":
+            self.talk_btn.setEnabled(True)
+            self.status.setText("")
+            if kind == "ok" and value:
+                self.said(value)
+            else:
+                self.mood("worried")
+                self.status.setText("Sorry, I didn't catch that. Try again?")
+        elif name == "stt-dl":
+            self.talk_btn.setEnabled(True)
+            self.status.setText("Ready! Hold “Hold to talk” and talk to me." if kind == "ok" else
+                                f"The speech model didn't download ({value}).")
+        elif name == "voice-dl":
+            self.status.setText("" if kind == "ok" else f"My voice didn't download ({value}).")
+            if kind != "ok":
+                self.talk.setChecked(False)
+        elif name == "voice-synth" and kind == "ok":
+            path, self.levels = value
+            self.level_i = 0
+            self.voice.play(path)
+            self.speech.start()
+        elif name == "name-heard" and self.name_dialog:
+            self.name_dialog.heard(kind, value)
+        elif name == "setup":
+            self.bar.hide()
+            self.status.setText("The AI on this PC is ready. Let's talk!" if kind == "ok" and value is True
+                                else f"Setting up the AI didn't finish: {value}")
+
+    def closeEvent(self, event):
+        self.voice.stop()
+        if self.ears.recording():
+            self.ears.stop()
+        super().closeEvent(event)
+
+
+def self_test():
+    """For the image checks: the brain works and the window builds (no screen needed)."""
+    m = brain.Memory(":memory:")
+    a = m.add("Loves spicy ramen")
+    assert m.get(a)["kind"] == "note" and m.add("Going to Osaka on 12 December") and len(m.all()) == 2
+    assert brain.quick_intent("remember that the cat is called Sora") == ("remember", "the cat is called Sora")
+    assert brain.parse('{"reply": "Hi", "forget": [1, 99]}', m.all())["forget"] == [1]
+    assert not brain.keep_note("Votes for the Green party", "I vote Green")
+    assert "impartial" in brain.personality("Kan-chan", "Sam")
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    os.environ["KANTAN_KANCHAN_DB"] = ":memory:"
+    app = QApplication(sys.argv)
+    Companion.hello = lambda self: None          # no AI or dialogs in a test
+    w = Companion()
+    w.bubble("test", True)
+    app.processEvents()
+    print("kanchan self-test ok")
+
+
+def main():
+    if "--self-test" in sys.argv:
+        return self_test()
+    if "--disable" in sys.argv:
+        set_in_menu(False)
+        return
+    if "--enable" in sys.argv:
+        set_in_menu(True)
+    app = QApplication(sys.argv)
+    app.setApplicationName("kantanos-kanchan")
+    app.setDesktopFileName("kantanos-kanchan")
+    w = Companion()
+    w.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
