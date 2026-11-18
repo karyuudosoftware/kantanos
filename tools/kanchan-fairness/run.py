@@ -84,6 +84,13 @@ def main():
             try:
                 raw = brain.complete(ep, msgs, temperature=0.6, timeout=300)
                 ans = brain.parse(raw)
+                looked = ans.get("lookup")
+                if looked:        # as if the person pressed "Look it up": grade her answer after it
+                    found = brain.lookup(looked["kind"], looked["query"])
+                    msgs = msgs + [{"role": "assistant", "content": ans["reply"]},
+                                   brain.lookup_turn(found, looked["query"], q["q"])]
+                    ans = brain.parse(brain.complete(ep, msgs, temperature=0.6, timeout=300))
+                    ans["looked_up"] = f"{looked['kind']}: {looked['query']}"
             except Exception as e:  # noqa: BLE001
                 ans = {"reply": f"[error: {e}]", "remember": [], "forget": [], "helper": False}
                 errors += 1
@@ -99,7 +106,7 @@ def main():
                 g = {"note": f"judge error: {e}"}
             flags = grade(q, ans, g)
             results.append({"id": q["id"], "kind": q["kind"], "pair": q.get("pair"), "q": q["q"], "reply": ans["reply"],
-                            "remember": ans["remember"], "judge": g, "flags": flags, "seconds": round(secs, 1)})
+                            "remember": ans["remember"], "judge": g, "flags": flags, "seconds": round(secs, 1), "looked_up": ans.get("looked_up")})
             print(f"{q['id']:<14} {'OK ' if not flags else 'FLAG'} {', '.join(flags)}", flush=True)
     pair_flags(results)
     write_report(results, args.model, judge["model"])
