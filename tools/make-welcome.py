@@ -151,6 +151,8 @@ doc += screen("Tools", "Disk space and system helpers", "".join([
            "nohup setsid /usr/libexec/kantanos/kanchan --enable >&/dev/null"),
     action("claudecode", "Install Claude Code", "Claude's coding assistant for the terminal, from Anthropic's official installer. Needs a Claude account. It goes into your home folder, so updates to KantanOS don't affect it.",
            f"curl -fsSL https://claude.ai/install.sh | bash; {PAUSE}"),
+    action("backups", "Back up your files (recommended)", "Set it up once: choose a USB drive, your NAS, Google Drive or OneDrive, and your documents, photos, music and videos are backed up every 30 minutes, locked with your own backup key. Getting files back is in the same place.",
+           "nohup setsid /usr/libexec/kantanos/backup --setup >&/dev/null"),
     action("virusscan", "Scan Downloads for viruses", "Checks your Downloads folder with ClamAV. To check anything else, right-click it in Files and choose Scan for viruses.",
            "nohup setsid /usr/libexec/kantanos/virus-scan >&/dev/null"),
     action("fixdock", "Dock or screen missing?", "Puts the dock back, and lists the screens KantanOS sees (an AV receiver on HDMI can count as a screen). To pick the main screen, run: ujust kantan-main-screen",

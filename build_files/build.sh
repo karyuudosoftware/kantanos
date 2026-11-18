@@ -79,6 +79,10 @@ sha256sum -c - <<'SUMS'
 SUMS
 systemctl disable ollama.service 2>/dev/null || true
 
+# Backups (/usr/libexec/kantanos/backup): restic makes locked, only-what-changed backups;
+# rclone lets it use Google Drive and OneDrive.
+dnf5 -y install restic rclone
+
 # Virus scanning: ClamAV, its list of known viruses kept up to date in the background, and
 # "Scan for viruses" in Files (/usr/libexec/kantanos/virus-scan).
 dnf5 -y install clamav clamav-update

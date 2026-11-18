@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Backups
+GenericName=Back up your files
+Comment=Copies your files to a USB drive, the NAS, Google Drive or OneDrive every 30 minutes, and gets them back
+Exec=/usr/libexec/kantanos/backup
+Icon=drive-harddisk
+Categories=System;Utility;
+Keywords=backup;restore;copy;safe;usb;nas;google drive;onedrive;

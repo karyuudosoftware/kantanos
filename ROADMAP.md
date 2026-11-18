@@ -231,9 +231,15 @@ Steps:
 
 ## Storage, safety and system
 
-- [~] Backups: Déjà Dup (Google Drive, OneDrive, NAS, USB) and Pika Backup (hourly, older
-      versions of each file) in Welcome → Tools. Still to do: a KantanOS one-step setup and
-      every-30-minutes schedule.
+- [x] Backups: KantanOS **Backups** app (Welcome → Tools → "Back up your files", app menu
+      "Backups"): pick a USB drive, a NAS share, Google Drive or OneDrive; tick folders (sizes
+      shown, free-space warning for the cloud); write down a 30-letter backup key. Then restic
+      backs up every 30 minutes (user timer `kantanos-backup.timer`), waits quietly while the
+      drive is unplugged (a reminder after 3 days), keeps half-hourly versions for a day, then
+      daily/weekly/monthly. "Get files back" opens the backups in Files by date, or puts
+      everything back on a new PC (type the key). Everything is locked before it leaves the PC.
+      Déjà Dup and Pika stay in Welcome → Tools as alternatives. Not tested: Google Drive and
+      OneDrive sign-in (needs real accounts).
 - [x] Security: strict KantanOS firewall zone (only phone link, game streaming, device
       discovery and file sharing reachable; `ujust kantan-firewall`), ClamAV with "Scan for
       viruses" in Files and Welcome → Tools.

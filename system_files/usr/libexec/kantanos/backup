@@ -1,0 +1,616 @@
+#!/usr/bin/python3
+"""KantanOS Backups: set up once, then your files are backed up every 30 minutes.
+
+  backup          the window (set up, back up now, get files back)
+  backup run      one backup now (what the half-hourly timer runs)
+
+The work is done by /usr/share/kantanos/backup/engine.py (restic + rclone).
+"""
+import os
+import subprocess
+import sys
+import threading
+import time
+
+sys.path.insert(0, "/usr/share/kantanos/backup")
+import engine as E  # noqa: E402
+
+if len(sys.argv) > 1 and sys.argv[1] == "run":
+    print(E.run(force="--now" in sys.argv))
+    sys.exit(0)
+
+from PySide6.QtCore import QObject, Qt, QTimer, Signal  # noqa: E402
+from PySide6.QtGui import QFont, QGuiApplication  # noqa: E402
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QFileDialog, QHBoxLayout, QLabel,  # noqa: E402
+                               QLineEdit, QMessageBox, QPushButton, QRadioButton, QStackedWidget, QVBoxLayout,
+                               QWidget)
+
+
+class Bridge(QObject):
+    done = Signal(str, object)
+
+
+def big(label, scale=1.5, bold=True):
+    f = QFont(label.font())
+    f.setPointSizeF(f.pointSizeF() * scale)
+    f.setBold(bold)
+    label.setFont(f)
+    return label
+
+
+def para(text=""):
+    lab = QLabel(text)
+    lab.setWordWrap(True)
+    lab.setTextFormat(Qt.PlainText)
+    return lab
+
+
+def note(text=""):
+    lab = para(text)
+    lab.setStyleSheet("color: palette(placeholder-text);")
+    return lab
+
+
+class Window(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Backups")
+        self.resize(720, 620)
+        self.bridge = Bridge()
+        self.bridge.done.connect(self.on_done)
+        self.browse_proc = None
+        self.pages = QStackedWidget()
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(28, 24, 28, 24)
+        lay.addWidget(self.pages)
+        self.home = self.make_home()
+        self.where_page = self.make_where()
+        self.what_page = self.make_what()
+        self.key_page = self.make_key()
+        self.files_page = self.make_files()
+        for p in (self.home, self.where_page, self.what_page, self.key_page, self.files_page):
+            self.pages.addWidget(p)
+        self.draft = {}
+        self.show_home()
+        self.tick = QTimer(self, interval=15000, timeout=self.refresh_home)
+        self.tick.start()
+
+    def in_thread(self, name, fn, *args):
+        def work():
+            try:
+                self.bridge.done.emit(name, ("ok", fn(*args)))
+            except Exception as e:  # noqa: BLE001 - shown in plain words
+                self.bridge.done.emit(name, ("error", str(e)))
+        threading.Thread(target=work, daemon=True).start()
+
+    # ---- home ---------------------------------------------------------------------------
+    def make_home(self):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.addWidget(big(QLabel("Backups"), 1.8))
+        self.status = big(para(), 1.25)
+        self.detail = para()
+        v.addWidget(self.status)
+        v.addWidget(self.detail)
+        v.addSpacing(10)
+        row = QHBoxLayout()
+        self.now_btn = QPushButton("Back up now")
+        self.now_btn.clicked.connect(self.back_up_now)
+        self.files_btn = QPushButton("Get files back")
+        self.files_btn.clicked.connect(self.show_files)
+        self.setup_btn = QPushButton("Set up backups")
+        self.setup_btn.clicked.connect(self.start_setup)
+        for b in (self.setup_btn, self.now_btn, self.files_btn):
+            b.setMinimumHeight(44)
+            row.addWidget(b)
+        v.addLayout(row)
+        v.addSpacing(10)
+        v.addWidget(note("Your files are backed up every 30 minutes while the place you chose is reachable. "
+                         "Each backup only adds what changed, older versions are kept (every half hour for a day, "
+                         "then one a day for a month, one a week for three months and one a month for two years), "
+                         "and everything is locked with your backup key before it leaves this PC."))
+        v.addStretch(1)
+        row2 = QHBoxLayout()
+        self.change_btn = QPushButton("Change where or what")
+        self.change_btn.clicked.connect(self.start_setup)
+        self.pause_btn = QPushButton()
+        self.pause_btn.clicked.connect(self.toggle_pause)
+        row2.addWidget(self.change_btn)
+        row2.addWidget(self.pause_btn)
+        row2.addStretch(1)
+        v.addLayout(row2)
+        return w
+
+    def show_home(self):
+        self.pages.setCurrentWidget(self.home)
+        self.refresh_home()
+
+    def refresh_home(self):
+        cfg, st = E.config(), E.state()
+        ready = bool(cfg.get("where")) and os.path.exists(E.KEY)
+        self.setup_btn.setVisible(not ready)
+        for b in (self.now_btn, self.files_btn, self.change_btn, self.pause_btn):
+            b.setVisible(ready)
+        if not ready:
+            self.status.setText("Your files aren't being backed up yet.")
+            self.detail.setText("Choose a USB drive, your NAS, Google Drive or OneDrive, and KantanOS keeps a copy "
+                                "of your documents, photos, music and videos there, every 30 minutes. It takes "
+                                "about a minute to set up.")
+            return
+        self.pause_btn.setText("Start backups again" if cfg.get("paused") else "Pause backups")
+        place = E.place_name(cfg)
+        if st.get("running"):
+            self.status.setText("Backing up now…")
+        elif cfg.get("paused"):
+            self.status.setText("Backups are paused.")
+        elif st.get("last_ok"):
+            self.status.setText(f"Last backup: {E.when_text(st['last_ok'])}.")
+        else:
+            self.status.setText("The first backup hasn't happened yet.")
+        lines = [f"Backups go to {place}."]
+        if st.get("waiting") and not st.get("running"):
+            lines.append(f"Waiting for {place}: plug it in or switch it on, and the backup happens by itself.")
+        if st.get("error"):
+            lines.append(f"The last try didn't work: {st['error']}")
+        if st.get("unreadable"):
+            lines.append("A few files couldn't be read (probably open in an app); they'll be tried again next time.")
+        if st.get("last_ok") and st.get("added") is not None:
+            lines.append(f"The last backup added {E.size_text(st['added'])}.")
+        self.detail.setText("\n".join(lines))
+        self.now_btn.setEnabled(not st.get("running"))
+
+    def back_up_now(self):
+        self.now_btn.setEnabled(False)
+        self.status.setText("Backing up now…")
+        self.in_thread("run", E.run, True)
+
+    def toggle_pause(self):
+        cfg = E.config()
+        cfg["paused"] = not cfg.get("paused")
+        E.save_config(cfg)
+        self.refresh_home()
+
+    # ---- setup 1: where -----------------------------------------------------------------
+    def make_where(self):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.addWidget(big(QLabel("Where should backups go?"), 1.5))
+        self.where_box = QVBoxLayout()
+        v.addLayout(self.where_box)
+        self.where_group = QButtonGroup(w)
+        self.where_note = note()
+        v.addWidget(self.where_note)
+        v.addWidget(note("Before anything leaves this PC it's locked with your backup key, so nobody else can read "
+                         "your backups: not Google, not Microsoft, not anyone who finds the drive."))
+        v.addStretch(1)
+        row = QHBoxLayout()
+        back = QPushButton("Cancel")
+        back.clicked.connect(self.show_home)
+        again = QPushButton("Look again")
+        again.setToolTip("After plugging in a drive")
+        again.clicked.connect(self.fill_where)
+        self.where_next = QPushButton("Next")
+        self.where_next.setDefault(True)
+        self.where_next.clicked.connect(self.where_chosen)
+        row.addWidget(back)
+        row.addStretch(1)
+        row.addWidget(again)
+        row.addWidget(self.where_next)
+        v.addLayout(row)
+        return w
+
+    def start_setup(self):
+        self.draft = dict(E.config())
+        self.draft.pop("paused", None)
+        self.pages.setCurrentWidget(self.where_page)
+        self.fill_where()
+
+    def fill_where(self):
+        while self.where_box.count():
+            item = self.where_box.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for b in self.where_group.buttons():
+            self.where_group.removeButton(b)
+        self.choices = []
+        for d in E.usb_drives():
+            name = d["label"] or "USB drive"
+            self.choices.append(({"where": "usb", "uuid": d["uuid"], "label": name},
+                                 f"USB drive “{name}” ({E.size_text(d['size'])})"))
+        for s in E.nas_shares():
+            self.choices.append(({"where": "nas", "share": s}, f"NAS share “{s}”"))
+        self.choices.append(({"where": "gdrive"}, "Google Drive (15 GB free)"))
+        self.choices.append(({"where": "onedrive"}, "OneDrive (5 GB free)"))
+        for i, (c, label) in enumerate(self.choices):
+            rb = QRadioButton(label)
+            rb.setMinimumHeight(34)
+            self.where_group.addButton(rb, i)
+            self.where_box.addWidget(rb)
+            if all(self.draft.get(k) == v for k, v in c.items()):
+                rb.setChecked(True)
+        tips = []
+        if not any(c["where"] == "usb" for c, _ in self.choices):
+            tips.append("No USB drive found: plug one in, then press “Look again”.")
+        if not any(c["where"] == "nas" for c, _ in self.choices):
+            tips.append("To use your NAS, connect it first (KantanOS Welcome → Connect your NAS).")
+        self.where_note.setText(" ".join(tips))
+
+    def where_chosen(self):
+        i = self.where_group.checkedId()
+        if i < 0:
+            return
+        choice = self.choices[i][0]
+        for k in ("uuid", "label", "share"):
+            self.draft.pop(k, None)
+        self.draft.update(choice)
+        if choice["where"] in E.CLOUD and not E.cloud_ready(choice["where"]):
+            name = E.CLOUD[choice["where"]][3]
+            if QMessageBox.question(self, "Sign in", f"Your browser will open so you can sign in to {name} and allow "
+                                    "KantanOS Backups to keep its own folder there. Only your locked backups are "
+                                    "stored in it.\n\nOpen the browser now?") != QMessageBox.Yes:
+                return
+            self.where_next.setEnabled(False)
+            self.where_note.setText(f"Sign in to {name} in the browser window that opened, then come back here.")
+            self.in_thread("cloud", E.connect_cloud, choice["where"])
+            return
+        self.show_what()
+
+    # ---- setup 2: what ------------------------------------------------------------------
+    def make_what(self):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.addWidget(big(QLabel("What should be backed up?"), 1.5))
+        self.folder_checks = []
+        for rel, name, on in E.FOLDERS:
+            cb = QCheckBox(name)
+            cb.setMinimumHeight(32)
+            cb.rel, cb.default, cb.size = rel, on, 0
+            cb.toggled.connect(self.update_total)
+            self.folder_checks.append(cb)
+            v.addWidget(cb)
+        self.total = para()
+        v.addWidget(self.total)
+        v.addWidget(note("Games aren't included: Steam and the other stores keep your saves online, and games "
+                         "can always be downloaded again."))
+        v.addStretch(1)
+        row = QHBoxLayout()
+        back = QPushButton("Back")
+        back.clicked.connect(lambda: self.pages.setCurrentWidget(self.where_page))
+        nxt = QPushButton("Next")
+        nxt.setDefault(True)
+        nxt.clicked.connect(self.what_chosen)
+        row.addWidget(back)
+        row.addStretch(1)
+        row.addWidget(nxt)
+        v.addLayout(row)
+        return w
+
+    def show_what(self):
+        chosen = self.draft.get("folders")
+        for cb in self.folder_checks:
+            cb.setChecked(cb.rel in chosen if chosen is not None else cb.default)
+            cb.setEnabled(os.path.exists(os.path.join(E.HOME, cb.rel)) or cb.rel.startswith("."))
+        self.pages.setCurrentWidget(self.what_page)
+        self.total.setText("Working out how much that is…")
+        self.in_thread("sizes", lambda: {cb.rel: E.folder_size(cb.rel) for cb in self.folder_checks})
+
+    def update_total(self):
+        n = sum(cb.size for cb in self.folder_checks if cb.isChecked())
+        text = f"About {E.size_text(n)} for the first backup; after that only changes are added."
+        free = E.FREE_CLOUD_GB.get(self.draft.get("where"))
+        if free and n > free * 1e9 * 0.8:
+            text += (f" That's close to or more than the {free} GB {E.place_name(self.draft)} gives for free: "
+                     "untick something (Videos is usually the biggest) or use a USB drive or the NAS.")
+        self.total.setText(text)
+
+    def what_chosen(self):
+        self.draft["folders"] = [cb.rel for cb in self.folder_checks if cb.isChecked()]
+        if not self.draft["folders"]:
+            return
+        self.pages.setCurrentWidget(self.key_page)
+        self.key_title.setText("Checking the place you chose…")
+        self.key_body.setText("")
+        self.key_show.hide()
+        self.key_input.hide()
+        self.key_ok.hide()
+        self.key_save.hide()
+        self.key_finish.setEnabled(False)
+        self.in_thread("probe", self.probe)
+
+    def probe(self):
+        rp = E.repo(self.draft)
+        if not rp:
+            return ("missing", "")
+        if not E.repo_exists(rp):
+            return ("new", rp, None)
+        mine = os.path.exists(E.KEY) and E.check_key(rp, open(E.KEY).read().strip())
+        return ("existing", rp, mine)
+
+    # ---- setup 3: the backup key --------------------------------------------------------
+    def make_key(self):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        self.key_title = big(para(), 1.5)
+        self.key_body = para()
+        self.key_show = QLabel()
+        self.key_show.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        f = QFont("monospace")
+        f.setStyleHint(QFont.Monospace)
+        f.setPointSizeF(self.font().pointSizeF() * 1.6)
+        f.setBold(True)
+        self.key_show.setFont(f)
+        self.key_show.setAlignment(Qt.AlignCenter)
+        self.key_show.setStyleSheet("QLabel { padding: 16px; border-radius: 12px; background: palette(alternate-base); }")
+        self.key_input = QLineEdit()
+        self.key_input.setPlaceholderText("XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX")
+        self.key_input.setFont(f)
+        self.key_save = QPushButton("Save a copy to a file…")
+        self.key_save.clicked.connect(self.save_key_file)
+        self.key_ok = QCheckBox("I've written down my backup key (or saved it somewhere safe that isn't this PC)")
+        self.key_ok.toggled.connect(lambda on: self.key_finish.setEnabled(on))
+        for x in (self.key_title, self.key_body, self.key_show, self.key_input, self.key_save, self.key_ok):
+            v.addWidget(x)
+        v.addStretch(1)
+        row = QHBoxLayout()
+        back = QPushButton("Back")
+        back.clicked.connect(lambda: self.pages.setCurrentWidget(self.what_page))
+        self.key_finish = QPushButton("Start backups")
+        self.key_finish.setDefault(True)
+        self.key_finish.clicked.connect(self.finish)
+        row.addWidget(back)
+        row.addStretch(1)
+        row.addWidget(self.key_finish)
+        v.addLayout(row)
+        return w
+
+    def show_probe(self, result):
+        kind, rp = result[0], result[1]
+        self.draft_repo = rp
+        if kind == "missing":
+            self.key_title.setText(f"Can't reach {E.place_name(self.draft)} right now.")
+            self.key_body.setText("Check it's plugged in or switched on, then go back and try again.")
+            return
+        if kind == "existing":
+            self.key_mode = "existing"
+            if result[2]:
+                self.key_title.setText("This place already has your backups.")
+                self.key_body.setText("They use the backup key already on this PC, so there's nothing to type.")
+                self.key_new = open(E.KEY).read().strip()
+                self.key_finish.setText("Start backups")
+                self.key_finish.setEnabled(True)
+                return
+            self.key_title.setText("There are KantanOS backups here already.")
+            self.key_body.setText("Type the backup key that was shown when they were set up (it's on the note you "
+                                  "wrote, or in the file you saved). With it, this PC can get files from them and "
+                                  "keep backing up to the same place.")
+            self.key_input.clear()
+            self.key_input.show()
+            self.key_finish.setText("Use these backups")
+            self.key_finish.setEnabled(True)
+            self.key_input.setFocus()
+            return
+        self.key_mode = "new"
+        self.key_new = E.new_key()
+        self.key_title.setText("Your backup key")
+        self.key_body.setText("Write this down and keep it somewhere safe. It's the only way to open your backups "
+                              "on another PC (if this one is lost, broken or replaced). Nobody, not even KantanOS, "
+                              "can open them without it. This PC remembers it, so you won't need it day to day.")
+        self.key_show.setText(self.key_new)
+        self.key_show.show()
+        self.key_save.show()
+        self.key_ok.setChecked(False)
+        self.key_ok.show()
+        self.key_finish.setText("Start backups")
+        self.key_finish.setEnabled(False)
+
+    def save_key_file(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Save your backup key", os.path.join(E.HOME, "KantanOS backup key.txt"),
+                                              "Text (*.txt)")
+        if path:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(f"KantanOS backup key for {E.HOST}\n\n{self.key_new}\n\nBackups go to {E.place_name(self.draft)}.\n"
+                        "Keep this file somewhere that isn't this PC (a USB stick, printed, a password manager).\n")
+
+    def finish(self):
+        self.key_finish.setEnabled(False)
+        if self.key_mode == "existing" and not self.key_input.isHidden():
+            key = E.clean_key(self.key_input.text())
+            self.key_body.setText("Checking the key…")
+            self.in_thread("usekey", lambda: key if E.check_key(self.draft_repo, key) else "")
+            return
+        if self.key_mode == "existing":
+            self.in_thread("created", lambda: "")
+            return
+        self.key_body.setText("Getting the place ready…")
+        self.in_thread("created", E.create, self.draft_repo, self.key_new)
+
+    def finished(self, key):
+        E.save_key(key)
+        self.draft.pop("paused", None)
+        E.save_config(self.draft)
+        E.save_state(error="", waiting="")
+        E.timer(True)
+        subprocess.Popen(["systemctl", "--user", "start", "--no-block", E.SERVICE])
+        self.show_home()
+        self.status.setText("Backing up now…")
+        self.detail.setText("The first backup can take a while. You can keep using the PC (or close this window).")
+
+    # ---- get files back -----------------------------------------------------------------
+    def make_files(self):
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.addWidget(big(QLabel("Get files back"), 1.5))
+        self.files_info = para()
+        v.addWidget(self.files_info)
+        self.browse_btn = QPushButton("Open my backups in Files")
+        self.browse_btn.setMinimumHeight(44)
+        self.browse_btn.clicked.connect(self.browse)
+        v.addWidget(self.browse_btn)
+        inside = " → ".join(os.path.realpath(os.path.expanduser("~")).strip("/").split("/"))
+        v.addWidget(note("Each backup is a folder named by its date and time. Open the one from before things went "
+                         f"wrong, then {inside} to reach your folders. Find what you need and copy it back "
+                         "(for example to your Desktop)."))
+        v.addSpacing(16)
+        self.all_btn = QPushButton("Put everything back from the latest backup…")
+        self.all_btn.clicked.connect(self.put_back_all)
+        v.addWidget(self.all_btn)
+        v.addWidget(note("For a new or reset PC: brings back every backed-up folder as it was in the latest backup."))
+        v.addStretch(1)
+        row = QHBoxLayout()
+        self.files_done = QPushButton("Done")
+        self.files_done.clicked.connect(self.close_browse)
+        row.addStretch(1)
+        row.addWidget(self.files_done)
+        v.addLayout(row)
+        return w
+
+    def show_files(self):
+        self.pages.setCurrentWidget(self.files_page)
+        self.files_info.setText("Looking at your backups…")
+        self.browse_btn.setEnabled(False)
+        self.all_btn.setEnabled(False)
+        self.in_thread("snaps", E.snapshots, E.config())
+
+    def browse(self):
+        rp = E.repo(E.config())
+        if not rp:
+            return
+        os.makedirs(E.BROWSE, exist_ok=True)
+        if not self.browse_proc or self.browse_proc.poll() is not None:
+            env = dict(os.environ, RESTIC_REPOSITORY=rp, RESTIC_PASSWORD_FILE=E.KEY)
+            self.browse_proc = subprocess.Popen(["restic", "mount", "--host", E.HOST, "--time-template",
+                                                 "2006-01-02 at 15.04", E.BROWSE], env=env,
+                                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.files_info.setText("Opening your backups…")
+        self.in_thread("mounted", self.wait_mounted)
+
+    def wait_mounted(self):
+        for _ in range(60):
+            if os.path.isdir(os.path.join(E.BROWSE, "snapshots")):
+                return True
+            time.sleep(0.5)
+        return False
+
+    def close_browse(self):
+        if self.browse_proc and self.browse_proc.poll() is None:
+            subprocess.run(["fusermount3", "-u", E.BROWSE], capture_output=True)
+            try:
+                self.browse_proc.wait(10)
+            except subprocess.TimeoutExpired:
+                self.browse_proc.kill()
+        self.browse_proc = None
+        self.show_home()
+
+    def put_back_all(self):
+        snaps = self.snaps or []
+        if not snaps:
+            return
+        latest = snaps[0]
+        home_then = os.path.commonpath(latest.get("paths") or [E.HOME])
+        same_home = home_then == os.path.realpath(E.HOME) or home_then.startswith(os.path.realpath(E.HOME) + "/")
+        target = "/" if same_home else os.path.join(E.HOME, "Restored from backup")
+        msg = (f"This copies every file from the backup of {E.when_text(self.snap_time(latest))} back where it was. "
+               "Files with the same name are replaced by the backed-up copy; files that aren't in the backup are left "
+               "alone.") if same_home else \
+              (f"This backup came from another account, so everything goes into the folder “Restored from "
+               f"backup” in your home folder, where you can move things where you want them.")
+        if QMessageBox.question(self, "Put everything back", msg + "\n\nGo ahead?") != QMessageBox.Yes:
+            return
+        self.all_btn.setEnabled(False)
+        self.files_info.setText("Putting your files back… This can take a while.")
+        rp = E.repo(E.config())
+        self.in_thread("restored", lambda: E.restic(["restore", latest["id"], "--target", target], rp))
+
+    @staticmethod
+    def snap_time(s):
+        import datetime
+        try:
+            return datetime.datetime.fromisoformat(s["time"][:19]).timestamp()
+        except (KeyError, ValueError):
+            return 0
+
+    # ---- results from the background ----------------------------------------------------
+    def on_done(self, name, result):
+        kind, value = result
+        if kind == "error":
+            QMessageBox.warning(self, "Backups", f"Something went wrong: {value}")
+            self.show_home()
+            return
+        if name == "run":
+            self.refresh_home()
+        elif name == "cloud":
+            self.where_next.setEnabled(True)
+            if value:
+                self.where_note.setText(f"Signing in didn't finish ({value}). Try again, or choose another place.")
+            else:
+                self.show_what()
+        elif name == "sizes":
+            for cb in self.folder_checks:
+                cb.size = value.get(cb.rel, 0)
+                cb.setText(f"{dict((r, n) for r, n, _ in E.FOLDERS)[cb.rel]}  ({E.size_text(cb.size)})")
+            self.update_total()
+        elif name == "probe":
+            self.show_probe(value)
+        elif name == "usekey":
+            if value:
+                self.finished(value)
+            else:
+                self.key_body.setText("That key doesn't open these backups. Check it against your note and try again "
+                                      "(capital letters and dashes don't matter).")
+                self.key_finish.setEnabled(True)
+        elif name == "created":
+            if value:
+                self.key_body.setText(f"Couldn't get the place ready: {value}")
+                self.key_finish.setEnabled(True)
+            else:
+                self.finished(self.key_new)
+        elif name == "snaps":
+            self.snaps = value
+            if value is None:
+                self.files_info.setText(f"Can't reach {E.place_name(E.config())} right now. Plug it in or switch it "
+                                        "on, then try again.")
+            elif not value:
+                self.files_info.setText("There are no backups yet. The first one is on its way.")
+            else:
+                if len(value) == 1:
+                    self.files_info.setText(f"1 backup, made {E.when_text(self.snap_time(value[0]))}.")
+                else:
+                    self.files_info.setText(f"{len(value)} backups, the latest {E.when_text(self.snap_time(value[0]))} "
+                                            f"and the oldest {E.when_text(self.snap_time(value[-1]))}.")
+                self.browse_btn.setEnabled(True)
+                self.all_btn.setEnabled(True)
+        elif name == "mounted":
+            if value:
+                self.files_info.setText("Your backups are open in Files. Press Done when you've finished.")
+                subprocess.Popen(["dolphin", "--new-window", os.path.join(E.BROWSE, "snapshots")],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 start_new_session=True)
+            else:
+                self.files_info.setText("Couldn't open the backups. Try again in a moment.")
+        elif name == "restored":
+            ok = value.returncode == 0
+            self.files_info.setText("Everything is back." if ok else
+                                    "Some files couldn't be put back: " + ((value.stderr or "").strip().splitlines() or [""])[-1])
+            self.all_btn.setEnabled(True)
+
+    def closeEvent(self, event):
+        if self.browse_proc and self.browse_proc.poll() is None:
+            subprocess.run(["fusermount3", "-u", E.BROWSE], capture_output=True)
+        super().closeEvent(event)
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setApplicationName("kantanos-backup")
+    app.setApplicationDisplayName("Backups")
+    app.setDesktopFileName("kantanos-backup")
+    QGuiApplication.setWindowIcon(app.windowIcon())
+    w = Window()
+    w.show()
+    if "--setup" in sys.argv and not E.config().get("where"):
+        w.start_setup()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,10 @@
+[Unit]
+Description=KantanOS Backups: back up your files
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/kantanos/backup run
+Nice=10
+IOSchedulingClass=idle
+CPUWeight=20
