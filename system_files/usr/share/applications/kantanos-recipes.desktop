@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Recipe book
+Name[ja]=レシピ帳
+Comment=Keep the family's recipes, change how many they serve, and cook step by step with timers
+Exec=kantan-recipes
+Icon=food
+Categories=Utility;Education;
+Keywords=recipe;cooking;cook;food;kitchen;ingredients;baking;timer;

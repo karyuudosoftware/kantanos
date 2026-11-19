@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Service
+MimeType=image/jpeg;image/png;image/webp;image/tiff;
+Actions=recipe
+X-KDE-StartupNotify=false
+
+[Desktop Action recipe]
+Name=Add to my recipe book
+Icon=list-add
+Exec=kantan-recipes %f

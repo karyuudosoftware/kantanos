@@ -169,8 +169,19 @@ on the real PC.*
         sign came out garbled).
         All the AI apps now ask Ollama for one memory size (16384, also its default in
         `kantanos-ollama.service`): a different size made it reload the whole model each time.
-  - [ ] Recipe book (save from typing, a website or a photo of a cookbook page; scale
-        servings; big step-by-step cooking view).
+  - [x] **Recipe book** (`kantan-recipes`, Welcome, app menu, right-click a photo → "Add to my
+        recipe book"). Recipes are files in `~/Documents/Recipes` (backed up, easy to share).
+        Add one by typing/pasting, from a website (the recipe data the site publishes is read
+        directly, with its photo: tested on BBC Good Food, Allrecipes, Just One Cookbook; sites
+        without it go through the AI), or from a photo of a cookbook page (OCR plus the AI
+        looking at the photo, which fixed the scanner's 225¢ → 225g and 558 → 55g). Every new
+        recipe opens for checking before it's saved. Serves 12 → 4 rescales the amounts
+        (fractions, 2 cups, 1/3 tbsp → 1 tsp, Japanese 大さじ2 / 100～120g). "Start cooking":
+        full screen, one big step at a time, timers found in the steps ("Start a 30 mins
+        timer", T), an alarm and notification when one ends, ingredients on I, read aloud on R,
+        and the screen stays on. Members-only pages (Cookpad premium) are noticed and the
+        person is told only part of the recipe is there; nothing is worked around. An oven
+        temperature the AI drops is put back as step 1. VM-tested end to end.
   - [ ] Make pictures from words and fix photos (remove things, tidy old photos) on the PC.
   - [ ] Later, its own step: Android companion app.
 - [x] **KantanOS Helper** (Welcome → Tools, or search "fix"): reads recent crashes, failed
