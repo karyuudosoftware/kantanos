@@ -3,6 +3,8 @@
 
   kantan-pictures              the window (Describe a picture, Find photos)
   kantan-pictures FILE         describe this picture (Files: right-click → Describe this picture)
+  kantan-pictures --fix FILE   fix this photo (Files: right-click → Fix this photo)
+  kantan-pictures --make       open on "Make a picture"
   kantan-pictures --self-test
 
 Describe: says what's in a picture in plain words (people, place, colours, any writing),
@@ -11,6 +13,9 @@ Find photos: looks through a photo folder once (only with the AI on this PC, so 
 leave it) and keeps a short description of each in ~/.local/share/kantanos/pictures/photos.db;
 then "beach", "birthday cake" or "dog in the snow" finds them. People are never named or
 recognised here.
+Make a picture / Fix a photo: FLUX.2 klein on this PC (painter.py, painter_ui.py in
+/usr/share/kantanos/ai); pictures made are kept in ~/Pictures/Made with AI, marked as made
+with AI; a fixed photo is saved beside the original, which is never changed.
 """
 import os
 import re
@@ -194,7 +199,7 @@ def search(db, query, folder=None, limit=200):
 
 
 # ---- the window -----------------------------------------------------------------------------------
-def window(path=None):
+def window(path=None, start=""):
     from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
     from PySide6.QtGui import QFont, QIcon, QImageReader, QPixmap
     from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
@@ -401,6 +406,10 @@ def window(path=None):
     hint.setStyleSheet("color: gray")
     fl.addWidget(hint)
     tabs.addTab(fpage, QIcon.fromTheme("edit-find"), "Find photos")
+    import painter_ui                      # Make a picture, Fix a photo (FLUX.2 klein on this PC)
+    make_tab, fix_tab = painter_ui.MakeTab(say), painter_ui.FixTab(say)
+    tabs.addTab(make_tab, QIcon.fromTheme("draw-brush"), "Make a picture")
+    tabs.addTab(fix_tab, QIcon.fromTheme("edit-image", QIcon.fromTheme("draw-freehand")), "Fix a photo")
     db = connect()
 
     def count_text():
@@ -560,12 +569,28 @@ def window(path=None):
     bridge.read_end.connect(read_done)
     bridge.percent.connect(lambda p: bar.setValue(p))
     w.resizeEvent = lambda ev: show_pic()
-    w.closeEvent = lambda ev: (st["stop"].set(), stop_reading(), ev.accept())
+    def closing(ev):
+        if make_tab.busy or fix_tab.busy:
+            if QMessageBox.question(w, TITLE, "A picture is still being made. Stop it and close?") != \
+                    QMessageBox.StandardButton.Yes:
+                return ev.ignore()
+            make_tab.stop.set()
+            fix_tab.stop.set()
+        st["stop"].set()
+        stop_reading()
+        ev.accept()
+    w.closeEvent = closing
     count_text()
     w.show()
-    if path:
+    if path and start == "fix":
+        tabs.setCurrentWidget(fix_tab)
+        fix_tab.open(path)
+    elif path:
         QTimer.singleShot(100, lambda: describe_file(path))
-    w.parts = {"tabs": tabs, "describe_file": describe_file, "search": do_search, "query": query, "results": results}
+    elif start == "make":
+        tabs.setCurrentWidget(make_tab)
+    w.parts = {"tabs": tabs, "describe_file": describe_file, "search": do_search, "query": query, "results": results,
+               "make": make_tab, "fix": fix_tab}
     return app, w
 
 
@@ -608,7 +633,9 @@ def self_test():
         global DB
         DB = os.path.join(tempfile.mkdtemp(), "photos.db")
         _app, w = window()
-        assert w.windowTitle() == TITLE and w.parts["tabs"].count() == 2
+        assert w.windowTitle() == TITLE and w.parts["tabs"].count() == 4
+        import painter_ui
+        assert painter_ui.self_test()
     print("ok")
 
 
@@ -616,8 +643,9 @@ def main():
     args = sys.argv[1:]
     if args[:1] == ["--self-test"]:
         return self_test()
-    if args[:1] == ["--describe"]:
-        args = args[1:]
+    start = ""
+    if args[:1] in (["--describe"], ["--fix"], ["--make"]):
+        start = args.pop(0)[2:]
     if args and args[0].startswith("-"):
         print(__doc__)
         sys.exit(2)
@@ -625,7 +653,7 @@ def main():
     if path and path.startswith("file://"):
         from urllib.parse import unquote, urlsplit
         path = unquote(urlsplit(path).path)
-    app, _w = window(path)
+    app, _w = window(path, start)
     sys.exit(app.exec())
 
 

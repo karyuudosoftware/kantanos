@@ -2,8 +2,13 @@
 Type=Application
 Name=Picture helper
 Name[ja]=写真ヘルパー
-Comment=Describe a picture in words, read it aloud, find photos by what's in them
+Comment=Describe a picture, find photos by what's in them, make pictures from words, fix old photos
 Exec=kantan-pictures %f
 Icon=image-x-generic
 Categories=Graphics;Utility;
-Keywords=describe;photo;picture;find;search;blind;read aloud;
+Keywords=describe;photo;picture;find;search;blind;read aloud;make;draw;ai art;restore;old photo;remove;
+Actions=make;
+
+[Desktop Action make]
+Name=Make a picture
+Exec=kantan-pictures --make

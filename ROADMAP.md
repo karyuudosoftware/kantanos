@@ -142,7 +142,7 @@ on the real PC.*
 
 ## AI and accessibility
 
-- [~] **Local AI extras** (agreed Nov 2026, in this order; the phone app is its own step later):
+- [x] **Local AI extras** (agreed Nov 2026, in this order; the phone app is its own step later):
   - [x] **Letters and documents** (`kantan-docs`, Welcome, app menu, right-click in Files →
         "Letters and documents"): opens PDFs, scans and photos of pages (tesseract, English and
         Japanese), Word and LibreOffice files. "Explain it": who it's from, what it is, what to
@@ -182,7 +182,22 @@ on the real PC.*
         and the screen stays on. Members-only pages (Cookpad premium) are noticed and the
         person is told only part of the recipe is there; nothing is worked around. An oven
         temperature the AI drops is put back as step 1. VM-tested end to end.
-  - [ ] Make pictures from words and fix photos (remove things, tidy old photos) on the PC.
+  - [x] **Make a picture / Fix a photo** (two more tabs in the Picture helper; right-click a
+        photo → Picture helper → "Fix this photo"). Engine: stable-diffusion.cpp (MIT), its
+        official Linux Vulkan build pinned by checksum in the image (`/usr/lib/kantanos/sd`,
+        `/usr/libexec/kantanos/sd-cli`). Model: FLUX.2 [klein] 4B Q8 + Qwen3 4B + FLUX.2 small
+        decoder, all Apache-2.0, about 7.9 GB downloaded on first use after asking (checksums
+        checked, carries on after a stop; refuses politely when the disk is too full). Make:
+        words + style (photo, watercolour, cartoon, storybook, ...) + shape; every picture is kept
+        in `~/Pictures/Made with AI` with "Made with AI" written into the file. Fix: tidy an old
+        photo (keeps black-and-white), add colour, remove something, change it; the result is
+        saved beside the original as "… (fixed)", the original never changes. Ollama's model is
+        unloaded first so the card's memory is free; `--offload-to-cpu` below 12 GB of video
+        memory. Family-friendly word check on what's typed. Tested: the real engine and models in
+        a KantanOS container on the processor (a watercolour cat in 148 s at 512 px; an old
+        photo's scratches and crease removed; swings removed from a photo), and the whole window
+        flow in the VM with a stand-in engine. Not tested yet: speed and memory on the RTX 4080
+        (needs the real PC), AMD/Intel graphics.
   - [ ] Later, its own step: Android companion app.
 - [x] **KantanOS Helper** (Welcome → Tools, or search "fix"): reads recent crashes, failed
       services, errors and disk space; its AI explains them in plain words and picks repairs

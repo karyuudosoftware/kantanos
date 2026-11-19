@@ -79,6 +79,23 @@ sha256sum -c - <<'SUMS'
 SUMS
 systemctl disable ollama.service 2>/dev/null || true
 
+# Picture helper, "Make a picture" / "Fix a photo": stable-diffusion.cpp (MIT), its official
+# Linux Vulkan build (NVIDIA, AMD and Intel graphics), pinned and checked. The picture model
+# itself (FLUX.2 klein, Apache 2.0) downloads on first use, after asking.
+SD_TAG=master-1106-532d2c1
+SD_ZIP=sd-master-532d2c1-bin-Linux-Ubuntu-26.04-x86_64-vulkan.zip
+curl -fsSL --retry 3 -o /tmp/sd.zip "https://github.com/leejet/stable-diffusion.cpp/releases/download/$SD_TAG/$SD_ZIP"
+sha256sum -c - <<'SUMS'
+ca30fe17f1735cdfb4c8561b75799070c25cc86a9e5438f4c0e1b163baae4e12  /tmp/sd.zip
+SUMS
+mkdir -p /usr/lib/kantanos/sd /usr/share/licenses/kantanos-sd
+unzip -q -o /tmp/sd.zip -d /usr/lib/kantanos/sd
+rm -f /tmp/sd.zip /usr/lib/kantanos/sd/start-server.* /usr/lib/kantanos/sd/sd-server
+mv /usr/lib/kantanos/sd/*.txt /usr/share/licenses/kantanos-sd/
+chmod 755 /usr/lib/kantanos/sd/sd-cli
+LD_LIBRARY_PATH=/usr/lib/kantanos/sd /usr/lib/kantanos/sd/sd-cli --help > /tmp/sd-help.txt
+grep -q -- --diffusion-model /tmp/sd-help.txt && rm /tmp/sd-help.txt
+
 # Backups (/usr/libexec/kantanos/backup): restic makes locked, only-what-changed backups;
 # rclone lets it use Google Drive and OneDrive.
 dnf5 -y install restic rclone

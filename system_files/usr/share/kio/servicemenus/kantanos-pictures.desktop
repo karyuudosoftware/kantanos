@@ -1,10 +1,16 @@
 [Desktop Entry]
 Type=Service
 MimeType=image/jpeg;image/png;image/webp;image/bmp;image/gif;image/tiff;
-Actions=describe
+Actions=describe;fix
+X-KDE-Submenu=Picture helper
 X-KDE-StartupNotify=false
 
 [Desktop Action describe]
 Name=Describe this picture
 Icon=view-preview
 Exec=kantan-pictures %f
+
+[Desktop Action fix]
+Name=Fix this photo
+Icon=edit-image
+Exec=kantan-pictures --fix %f

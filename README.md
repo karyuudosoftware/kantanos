@@ -106,7 +106,8 @@ A USB 2 stick is too slow for this OS; use USB 3 or, better, an SSD.
   `/usr/share/kantanos/ai/kantanai.py`, using the Helper's AI settings): explain a letter in
   plain words, check your writing, read aloud. Scans and photos are read with tesseract.
 - Picture helper (`kantan-pictures`): describes a picture in words (read aloud, questions about
-  it) and finds photos by what's in them after looking through a folder once, all on this PC.
+  it), finds photos by what's in them, makes pictures from words and fixes photos (FLUX.2 klein
+  through stable-diffusion.cpp, `/usr/share/kantanos/ai/painter*.py`), all on this PC.
 - Recipe book (`kantan-recipes`): recipes as files in `~/Documents/Recipes`, added by typing,
   from a website (schema.org Recipe data) or a photo of a cookbook page; scaling; full-screen
   cooking view with timers.
