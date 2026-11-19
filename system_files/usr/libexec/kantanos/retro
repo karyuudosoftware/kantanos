@@ -1,0 +1,342 @@
+#!/usr/bin/python3
+"""KantanOS Retro Games: Boxshelf (a 3D box-art shelf, GPL-3.0, by sassiestrhihno) in front of
+emulators from Flathub.
+
+The first time, a setup window installs the emulators, downloads the pinned Boxshelf release
+(checked against its SHA-256) into ~/Applications, and makes the game folders in
+~/Emulation/roms/<console>, where Boxshelf looks by itself. After that this simply starts
+Boxshelf, which updates itself from its own Settings (System, Update now).
+
+KantanOS never downloads games or BIOS files: the family brings their own.
+
+  retro               start Boxshelf, or set it up first
+  retro --setup       show the setup window again (to add the newer consoles, say)
+  retro --self-test
+"""
+import glob
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.request
+
+SHARE = "/usr/share/kantanos/retro"
+HOME = os.path.expanduser("~")
+APPS = os.path.join(HOME, "Applications")
+EMULATION = os.path.join(HOME, "Emulation")
+ROMS = os.path.join(EMULATION, "roms")
+STATE = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "kantanos", "retro.json")
+# Folders the emulators may read games from: home, USB drives, the NAS (Files mounts it under these)
+GAME_PLACES = ["home", "/run/media", "/media", "/mnt", "xdg-run/gvfs"]
+
+
+def load(name):
+    with open(os.path.join(SHARE, name), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def state():
+    try:
+        with open(STATE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_state(st):
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    with open(STATE, "w", encoding="utf-8") as f:
+        json.dump(st, f, indent=1)
+
+
+def find_boxshelf():
+    """The Boxshelf AppImage to start: the link Boxshelf keeps pointed at its current version,
+    else the newest one in ~/Applications."""
+    link = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local", "share"),
+                        "boxshelf", "Boxshelf.AppImage")
+    if os.path.isfile(link) and os.access(link, os.X_OK):
+        return link
+    found = sorted(glob.glob(os.path.join(APPS, "Boxshelf-*-linux.AppImage")), key=os.path.getmtime)
+    return found[-1] if found else None
+
+
+def flatpak_installed(app_id):
+    try:
+        return subprocess.run(["flatpak", "info", app_id], capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def make_folders(folders):
+    for name, _label in folders:
+        os.makedirs(os.path.join(ROMS, name), exist_ok=True)
+    readme = os.path.join(ROMS, "README.txt")
+    if not os.path.exists(readme):
+        lines = ["Put your own game files here, one folder per console:", ""]
+        lines += [f"  {name:<14}{label}" for name, label in folders]
+        lines += ["", "Boxshelf finds them by itself (Retro Games on the start screen). Some consoles also",
+                  "need a BIOS file from your own console: Boxshelf tells you which one and where it goes.",
+                  "Games on a USB drive or the NAS work too: add their folder in Boxshelf's Settings,",
+                  "Library tab.", ""]
+        with open(readme, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+
+
+def allow_game_places(app_id):
+    """Lets an emulator read games from home, USB drives and the NAS (user override, no password)."""
+    args = ["flatpak", "override", "--user"] + [f"--filesystem={p}" for p in GAME_PLACES] + [app_id]
+    subprocess.run(args, capture_output=True, timeout=30)
+
+
+def sha256_of(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def download_boxshelf(pin, progress=lambda done, total: None):
+    """Downloads the pinned release, refuses it unless the SHA-256 matches. Returns its path."""
+    os.makedirs(APPS, exist_ok=True)
+    dest = os.path.join(APPS, os.path.basename(pin["url"]))
+    if os.path.exists(dest) and sha256_of(dest) == pin["sha256"]:
+        os.chmod(dest, 0o755)
+        return dest
+    part = dest + ".part"
+    req = urllib.request.Request(pin["url"], headers={"User-Agent": "KantanOS-retro"})
+    with urllib.request.urlopen(req, timeout=60) as r, open(part, "wb") as f:
+        total = int(r.headers.get("Content-Length") or pin.get("size") or 0)
+        done = 0
+        while True:
+            block = r.read(1 << 18)
+            if not block:
+                break
+            f.write(block)
+            done += len(block)
+            progress(done, total)
+    if sha256_of(part) != pin["sha256"]:
+        os.remove(part)
+        raise RuntimeError("the downloaded Boxshelf didn't match the expected file, so it wasn't kept")
+    os.replace(part, dest)
+    os.chmod(dest, 0o755)
+    return dest
+
+
+def start_boxshelf(path):
+    # Boxshelf keeps its settings in ~/Boxshelf; its own first page finds the emulators and games.
+    os.execv(path, [path])
+
+
+# ---- the setup window -------------------------------------------------------------------------
+def setup_window(again=False):
+    import threading
+
+    from PySide6.QtCore import QObject, Qt, Signal
+    from PySide6.QtGui import QFont, QIcon
+    from PySide6.QtWidgets import (QApplication, QCheckBox, QHBoxLayout, QLabel, QProgressBar, QPushButton,
+                                   QVBoxLayout, QWidget)
+
+    emus, pin = load("emulators.json"), load("boxshelf.json")
+
+    class Bridge(QObject):
+        """Lives on the window's thread: the work thread only emits these, so every screen
+        update runs on the window's thread (touching widgets from another thread crashes)."""
+        step = Signal(str)
+        percent = Signal(int)
+        finished = Signal(str, str)                 # boxshelf path, error
+
+    class Worker:
+        def __init__(self, ids, bridge):
+            self.ids = ids
+            self.step, self.percent, self.finished = bridge.step, bridge.percent, bridge.finished
+
+        def run(self):
+            try:
+                for app_id, name, what in self.ids:
+                    if not flatpak_installed(app_id):
+                        self.step.emit(f"Installing {name} ({what})…")
+                        r = subprocess.run(["kantan-app", "install", app_id], stdin=subprocess.DEVNULL,
+                                           capture_output=True, text=True)
+                        if r.returncode != 0 or not flatpak_installed(app_id):
+                            raise RuntimeError(f"{name} couldn't be installed. Is the internet connected?")
+                    allow_game_places(app_id)
+                self.step.emit("Making your game folders…")
+                make_folders(emus["folders"])
+                path = find_boxshelf()
+                if not path:
+                    self.step.emit("Downloading Boxshelf…")
+                    path = download_boxshelf(pin, lambda d, t: self.percent.emit(int(d * 100 / t) if t else 0))
+                st = state()
+                st.update({"setup": True, "emulators": sorted(set(st.get("emulators", [])) |
+                                                               {i for i, _n, _w in self.ids})})
+                save_state(st)
+                self.finished.emit(path, "")
+            except Exception as e:                  # noqa: BLE001 - shown to the person
+                self.finished.emit("", str(e))
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setDesktopFileName("kantanos-retro")
+    w = QWidget()
+    w.setWindowTitle("Retro Games")
+    w.setWindowIcon(QIcon.fromTheme("input-gaming"))
+    f = w.font()
+    f.setPointSizeF(f.pointSizeF() * 1.3)
+    w.setFont(f)
+    lay = QVBoxLayout(w)
+    lay.setContentsMargins(48, 36, 48, 30)
+    lay.setSpacing(14)
+    head = QLabel("Retro Games: setting up your game shelf" if not again else "Retro Games: add consoles")
+    hf = QFont(w.font())
+    hf.setPointSizeF(hf.pointSizeF() * 1.6)
+    hf.setBold(True)
+    head.setFont(hf)
+    lay.addWidget(head)
+    intro = QLabel("Your games go on a shelf as real boxes you can take down, open and play, using "
+                   "<b>Boxshelf</b> (free and open source, made by sassiestrhihno). KantanOS installs the "
+                   "emulators that play each console.<br><br>"
+                   "You bring your own game files: KantanOS never downloads games or BIOS files.")
+    intro.setWordWrap(True)
+    intro.setTextFormat(Qt.TextFormat.RichText)
+    lay.addWidget(intro)
+
+    def label(group):
+        return ", ".join(w_ for _i, _n, w_ in emus[group])
+
+    classic = QCheckBox(f"Classic consoles: {label('classic')} (about 1.5 GB)")
+    newer = QCheckBox(f"Newer consoles: {label('newer')} (about 250 MB; these need a fast PC)")
+    have = set(state().get("emulators", []))
+    classic.setChecked(True)
+    newer.setChecked(again)
+    for box, group in ((classic, "classic"), (newer, "newer")):
+        if all(i in have for i, _n, _w in emus[group]):
+            box.setChecked(True)
+            box.setEnabled(False)
+            box.setText(box.text() + "  ✓ installed")
+        box.setStyleSheet("QCheckBox { spacing: 12px; }")
+        lay.addWidget(box)
+    status = QLabel("")
+    status.setWordWrap(True)
+    bar = QProgressBar()
+    bar.setRange(0, 100)
+    bar.hide()
+    lay.addWidget(status)
+    lay.addWidget(bar)
+    lay.addStretch(1)
+    row = QHBoxLayout()
+    folder = QPushButton(QIcon.fromTheme("folder-games"), "Open the games folder")
+    folder.hide()
+    folder.clicked.connect(lambda: (make_folders(emus["folders"]), subprocess.Popen(["xdg-open", ROMS])))
+    go = QPushButton(QIcon.fromTheme("dialog-ok"), "Set up")
+    go.setDefault(True)
+    close = QPushButton(QIcon.fromTheme("window-close"), "Close")
+    close.clicked.connect(w.close)
+    row.addWidget(folder)
+    row.addStretch(1)
+    row.addWidget(close)
+    row.addWidget(go)
+    lay.addLayout(row)
+    lay.addWidget(QLabel(f"<small>Boxshelf {pin['version']} · {pin['license']} · source: "
+                         f"<a href='{pin['source']}'>{pin['source']}</a></small>", openExternalLinks=True))
+    bridge = Bridge(w)
+    bridge.step.connect(status.setText)
+    bridge.percent.connect(lambda p: (bar.show(), bar.setValue(p)))
+
+    def done(path, err):
+        bar.hide()
+        if err:
+            status.setText(f"<b>Something went wrong:</b> {err}<br>Press Set up to try again.")
+            go.setEnabled(True)
+            go.setText("Set up")
+            return
+        status.setText("<b>All set.</b> Put your game files in the games folder, one folder per console "
+                       f"(<tt>{ROMS}</tt>). Boxshelf's first page finds them and the emulators.")
+        folder.show()
+        go.setEnabled(True)
+        go.setText("Start Boxshelf")
+        go.clicked.disconnect()
+        # This program becomes Boxshelf once the window has closed (main), so Boxshelf stays in
+        # the same app as far as the desktop is concerned and isn't closed with the window.
+        go.clicked.connect(lambda: (setattr(w, "launch", path), w.close(), app.quit()))
+
+    def start(ids=None):
+        if ids is None:
+            ids = (emus["classic"] if classic.isChecked() else []) + (emus["newer"] if newer.isChecked() else [])
+        go.setEnabled(False)
+        go.setText("Working…")
+        bar.setValue(0)
+        threading.Thread(target=Worker(ids, bridge).run, daemon=True).start()
+
+    bridge.finished.connect(done)
+    go.clicked.connect(lambda: start())
+    w.status = status
+    w.launch = None
+    w.resize(1100, 640)
+    w.show()
+    return app, w, start
+
+
+def self_test():
+    emus, pin = load("emulators.json"), load("boxshelf.json")
+    assert len(pin["sha256"]) == 64 and pin["url"].startswith("https://github.com/") and pin["url"].endswith(".AppImage")
+    assert all(len(e) == 3 and "." in e[0] for g in ("classic", "newer") for e in emus[g])
+    global ROMS, STATE, APPS
+    tmp = tempfile.mkdtemp()
+    try:
+        ROMS, STATE, APPS = os.path.join(tmp, "roms"), os.path.join(tmp, "retro.json"), os.path.join(tmp, "apps")
+        make_folders(emus["folders"])
+        assert os.path.isdir(os.path.join(ROMS, "psx")) and os.path.isfile(os.path.join(ROMS, "README.txt"))
+        save_state({"setup": True})
+        assert state()["setup"]
+        os.makedirs(APPS)
+        fake = os.path.join(APPS, "x.bin")
+        with open(fake, "wb") as f:
+            f.write(b"kantan")
+        assert sha256_of(fake) == hashlib.sha256(b"kantan").hexdigest()
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        os.environ["XDG_DATA_HOME"] = os.path.join(tmp, "data")
+        box = os.path.join(APPS, "Boxshelf-0-linux.AppImage")          # already there: no download
+        with open(box, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(box, 0o755)
+        app, w, start = setup_window()
+        assert w.windowTitle() == "Retro Games"
+        save_state({})
+        start([])                                   # the whole setup on its thread, nothing to install
+        import time
+        end = time.time() + 20
+        while "All set" not in w.status.text() and time.time() < end:
+            app.processEvents()
+            time.sleep(0.05)
+        assert "All set" in w.status.text(), w.status.text()
+        assert state()["setup"] and find_boxshelf() == box
+        from PySide6.QtWidgets import QPushButton
+        go = next(b for b in w.findChildren(QPushButton) if b.text() == "Start Boxshelf")
+        go.click()
+        assert w.launch == box                      # main() then becomes Boxshelf
+        w.close()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    print("retro self-test ok")
+
+
+def main():
+    args = sys.argv[1:]
+    if "--self-test" in args:
+        self_test()
+        return 0
+    path = find_boxshelf()
+    if path and state().get("setup") and "--setup" not in args:
+        start_boxshelf(path)
+    app, w, _start = setup_window(again="--setup" in args)
+    code = app.exec()
+    if w.launch:
+        start_boxshelf(w.launch)
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

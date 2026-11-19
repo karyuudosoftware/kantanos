@@ -1,0 +1,27 @@
+{
+  "classic": [
+    ["org.libretro.RetroArch", "RetroArch", "NES, SNES, N64, Game Boy, Mega Drive, arcade and more"],
+    ["org.duckstation.DuckStation", "DuckStation", "PlayStation"],
+    ["net.pcsx2.PCSX2", "PCSX2", "PlayStation 2"],
+    ["org.DolphinEmu.dolphin-emu", "Dolphin", "GameCube and Wii"],
+    ["org.ppsspp.PPSSPP", "PPSSPP", "PSP"],
+    ["net.kuribo64.melonDS", "melonDS", "Nintendo DS"],
+    ["org.azahar_emu.Azahar", "Azahar", "Nintendo 3DS"],
+    ["org.flycast.Flycast", "Flycast", "Dreamcast"]
+  ],
+  "newer": [
+    ["info.cemu.Cemu", "Cemu", "Wii U"],
+    ["net.rpcs3.RPCS3", "RPCS3", "PlayStation 3"],
+    ["app.xemu.xemu", "xemu", "original Xbox"]
+  ],
+  "folders": [
+    ["nes", "NES"], ["snes", "SNES"], ["n64", "Nintendo 64"], ["gb", "Game Boy"], ["gbc", "Game Boy Color"],
+    ["gba", "Game Boy Advance"], ["nds", "Nintendo DS"], ["3ds", "Nintendo 3DS"], ["gc", "GameCube"], ["wii", "Wii"],
+    ["wiiu", "Wii U"], ["psx", "PlayStation"], ["ps2", "PlayStation 2"], ["ps3", "PlayStation 3"], ["psp", "PSP"],
+    ["mastersystem", "Master System"], ["megadrive", "Mega Drive / Genesis"], ["segacd", "Sega CD"],
+    ["sega32x", "32X"], ["saturn", "Saturn"], ["dreamcast", "Dreamcast"], ["gamegear", "Game Gear"],
+    ["pcengine", "PC Engine / TurboGrafx-16"], ["neogeo", "Neo Geo"], ["arcade", "Arcade"],
+    ["atari2600", "Atari 2600"], ["atarilynx", "Atari Lynx"], ["wonderswan", "WonderSwan"], ["xbox", "Xbox"],
+    ["dos", "DOS"]
+  ]
+}

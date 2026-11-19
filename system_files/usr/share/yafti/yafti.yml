@@ -350,18 +350,6 @@ screens:
           - id: "remove-app"
             label: "Remove Heroic Games Launcher"
             script: "kantan-app uninstall com.heroicgameslauncher.hgl"
-      - id: "retrodeck"
-        title: "RetroDECK"
-        description: "Classic consoles in one app (the Retro Games tile). You supply your own game files; it can read them from the NAS."
-        default: false
-        status_script: "kantan-app status net.retrodeck.retrodeck"
-        options:
-          - id: "uninstall"
-            label: "Install RetroDECK"
-            script: "kantan-app install net.retrodeck.retrodeck"
-          - id: "remove-app"
-            label: "Remove RetroDECK"
-            script: "kantan-app uninstall net.retrodeck.retrodeck"
       - id: "lutris"
         title: "EA app, Ubisoft Connect, Battle.net"
         description: "Lutris is already installed. Search for the store in Lutris and choose Install; it then adds its games to your library. Games with anti-cheat may not run on Linux."

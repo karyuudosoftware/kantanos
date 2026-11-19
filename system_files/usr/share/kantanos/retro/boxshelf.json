@@ -1,0 +1,10 @@
+{
+  "name": "Boxshelf",
+  "version": "1.82.0-beta.14",
+  "url": "https://github.com/sassiestrhihno/boxshelf-beta/releases/download/v1.82.0-beta.14/Boxshelf-1.82.0-beta.14-linux.AppImage",
+  "sha256": "eaed35383b3f47b9ad0989c092716a1ca0d98d5975ddbbc9c865899bd8b04d19",
+  "size": 118801646,
+  "license": "GPL-3.0",
+  "source": "https://github.com/sassiestrhihno/boxshelf-source/tree/v1.82.0-beta.14",
+  "home": "https://github.com/sassiestrhihno/boxshelf-beta"
+}

@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Retro Games
+Name[ja]=レトロゲーム
+Comment=Your game shelf (Boxshelf) for classic consoles, with your own game files
+Exec=/usr/libexec/kantanos/retro
+Icon=input-gaming
+Categories=Game;Emulator;
+Keywords=boxshelf;emulator;retro;console;roms;
+Actions=setup;
+
+[Desktop Action setup]
+Name=Add consoles or set up again
+Exec=/usr/libexec/kantanos/retro --setup

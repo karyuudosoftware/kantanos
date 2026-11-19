@@ -67,8 +67,12 @@ the Windows VM install, cloud backups) whenever the owner is at the PC.
       search for channels and shows, favourites, the family's own M3U/XMLTV provider, and
       recordings (one show or every episode) by a background service that keeps the PC awake.
 - [~] **Game Mode:** Welcome → Games installs Heroic (Epic, GOG, Amazon → "Add to Steam") and points to Lutris for EA/Ubisoft; automatic library sync still to do.
-- [ ] **Retro Games:** RetroDECK set up as a LaunchBox replacement, emulator library on the
-      NAS (NFS rather than iSCSI).
+- [~] **Retro Games:** Boxshelf (3D box-art shelf, GPL-3.0, by sassiestrhihno) as the
+      LaunchBox replacement, in front of Flathub emulators (RetroArch, DuckStation, PCSX2,
+      Dolphin, PPSSPP, melonDS, Azahar, Flycast; Cemu, RPCS3, xemu optional). The tile sets it
+      up once: pinned release checked by SHA-256, game folders in `~/Emulation/roms/<console>`,
+      emulators allowed to read USB drives and the NAS; Boxshelf updates itself after that.
+      Still to do: the emulator library on the NAS (NFS rather than iSCSI), controller test.
 - [ ] **Vintage Computers:** DOS, Windows 3.x–98, classic Mac OS, Amiga, C64, Atari ST and
       more through existing emulators. Own ROMs/install media only; nothing copyrighted ships.
 - [x] **Anti-cheat games:** "Windows" tile on the start screen (only on PCs with Windows), app

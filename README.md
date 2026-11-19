@@ -93,8 +93,9 @@ A USB 2 stick is too slow for this OS; use USB 3 or, better, an SSD.
   Windows-apps drive once Wine is set up), the window title still says "Dolphin".
 - Mode chooser (`/usr/libexec/kantanos/modes`, Python + QML): a full-screen "What would you
   like to do?" overlay after login and from the Modes dock icon. Tiles are `*.mode` files in
-  `/usr/share/kantanos/modes` (Desktop, Game Mode = Steam Big Picture, Retro Games = RetroDECK
-  installed on first use; Watch TV is hidden until the custom TV app exists; no Kodi) plus the
+  `/usr/share/kantanos/modes` (Desktop, Game Mode = Steam Big Picture, Retro Games = Boxshelf
+  and Flathub emulators set up on first use by `/usr/libexec/kantanos/retro`; Watch TV =
+  `/usr/libexec/kantanos/tv`; no Kodi) plus the
   user's own web shortcuts in `~/.config/kantanos/modes`. Arrow keys, Enter, Esc, or mouse.
 - Looks: seven colour styles from one table in `tools/looks.py` (Light is the default; Sakura,
   Graphite, Ocean, Forest, Ember, Aurora). Each has a wallpaper, colour scheme, logo tint and

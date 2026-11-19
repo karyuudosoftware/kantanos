@@ -38,7 +38,6 @@ CHAT = [
 ]
 GAMES = [
     ("com.heroicgameslauncher.hgl", "Heroic Games Launcher", "Epic Games Store, GOG and Amazon Prime Gaming. In Heroic, open a game's menu and choose \"Add to Steam\" to see it in Game Mode."),
-    ("net.retrodeck.retrodeck", "RetroDECK", "Classic consoles in one app (the Retro Games tile). You supply your own game files; it can read them from the NAS."),
 ]
 TOOLS = [
     ("com.github.shundhammer.qdirstat", "QDirStat", "See which folders use the most space, as a sorted list (like TreeSize on Windows)."),

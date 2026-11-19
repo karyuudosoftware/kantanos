@@ -1,9 +1,9 @@
 [Mode]
 Name=Retro Games
 Name[ja]=レトロゲーム
-Comment=Classic consoles with your own game files (RetroDECK)
-Comment[ja]=自分のゲームファイルで遊ぶクラシックゲーム機 (RetroDECK)
+Comment=Your game shelf (Boxshelf), with your own game files
+Comment[ja]=自分のゲームファイルを並べたゲーム棚 (Boxshelf)
 Icon=retro
-Exec=flatpak run net.retrodeck.retrodeck
-Flatpak=net.retrodeck.retrodeck
+Exec=/usr/libexec/kantanos/retro
+Flatpak=org.libretro.RetroArch
 Order=40
