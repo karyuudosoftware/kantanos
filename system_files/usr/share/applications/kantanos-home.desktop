@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Smart home
+Name[ja]=スマートホーム
+Comment=The house temperature in the top bar (Home Assistant, Google Nest)
+Exec=kantan-home
+Icon=temperature-normal
+Categories=Utility;
+Keywords=thermostat;heating;nest;home assistant;temperature;smart home;
+Actions=open;
+
+[Desktop Action open]
+Name=Open Home Assistant
+Exec=kantan-home open

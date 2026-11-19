@@ -102,6 +102,13 @@ A USB 2 stick is too slow for this OS; use USB 3 or, better, an SSD.
   tile icons under `/usr/share/kantanos/looks/<id>`. Switch from the swatches in the mode
   chooser, the Look tab in Welcome, or `kantan-look set <id>`. Boot splash, installer and
   login screen always use the default look's colours.
+- Smart home (`kantan-home`, "Smart home" in the app menu and Welcome): the house temperature
+  in the top bar (widget `org.kantanos.home`), click to change it or switch the heating on/off.
+  Talks to Home Assistant (already in the home, found by zeroconf, or run on this PC as the
+  Podman Quadlet `/usr/share/kantanos/home/kantanos-homeassistant.container`, installed by
+  `/usr/libexec/kantanos/home-setup`). Sign-in is Home Assistant's own page in the browser;
+  only its sign-in key is kept, in `~/.config/kantanos/home.json`. A Google Nest is added in
+  Home Assistant's "Google Nest" integration (the window shows the steps).
 - Full codecs from the base (H.264, HEVC, AV1, AC-3, E-AC-3, DTS, TrueHD) and mpv
 - `ujust kantan-hdr-on`, `ujust kantan-hdr-off`, `ujust kantan-audio-71`, `ujust kantan-version`
 

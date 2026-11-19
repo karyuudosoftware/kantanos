@@ -1,0 +1,44 @@
+#!/bin/bash
+# KantanOS Smart home: run Home Assistant on this PC (root, through pkexec from kantan-home).
+#
+#   home-setup install   download Home Assistant, start it now and at every boot
+#   home-setup remove    stop it and stop starting it (its settings stay in /var/lib/kantanos/homeassistant)
+#
+# Home Assistant runs as a Podman container (Quadlet) on the host network at port 8123, so
+# phones on the home Wi-Fi can use the Home Assistant app too. Podman updates it with the
+# rest of the system's containers (podman-auto-update.timer).
+set -euo pipefail
+IMAGE=ghcr.io/home-assistant/home-assistant:stable
+UNIT=kantanos-homeassistant.container
+DEST=/etc/containers/systemd/$UNIT
+
+case "${1:-}" in
+install)
+    echo "STEP: Downloading Home Assistant (about 600 MB)…"
+    podman pull -q "$IMAGE"
+    mkdir -p /var/lib/kantanos/homeassistant /etc/containers/systemd
+    install -m 0644 /usr/share/kantanos/home/$UNIT "$DEST"
+    systemctl daemon-reload
+    echo "STEP: Starting Home Assistant…"
+    systemctl restart kantanos-homeassistant.service
+    systemctl enable --now podman-auto-update.timer >/dev/null 2>&1 || true
+    if command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then
+        firewall-cmd -q --permanent --add-port=8123/tcp || true
+        firewall-cmd -q --reload || true
+    fi
+    echo "STEP: done"
+    ;;
+remove)
+    systemctl stop kantanos-homeassistant.service 2>/dev/null || true
+    rm -f "$DEST"
+    systemctl daemon-reload
+    if command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then
+        firewall-cmd -q --permanent --remove-port=8123/tcp || true
+        firewall-cmd -q --reload || true
+    fi
+    ;;
+*)
+    echo "usage: home-setup install|remove" >&2
+    exit 2
+    ;;
+esac

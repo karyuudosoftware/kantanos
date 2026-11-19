@@ -1,0 +1,14 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [ { "Name": "KantanOS (built with Claude)" } ],
+        "Category": "Environment and Weather",
+        "Description": "The house temperature from your thermostat (through Home Assistant); click to change it",
+        "Icon": "temperature-normal",
+        "Id": "org.kantanos.home",
+        "License": "GPL-2.0-or-later",
+        "Name": "KantanOS Smart home",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

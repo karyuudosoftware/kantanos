@@ -1,0 +1,20 @@
+# Home Assistant on this PC (KantanOS Smart home). home-setup copies this file to
+# /etc/containers/systemd/ when someone chooses "Run Home Assistant on this PC".
+[Unit]
+Description=Home Assistant (KantanOS Smart home)
+
+[Container]
+ContainerName=homeassistant
+Image=ghcr.io/home-assistant/home-assistant:stable
+AutoUpdate=registry
+Network=host
+Volume=/var/lib/kantanos/homeassistant:/config:Z
+Volume=/run/dbus:/run/dbus:ro
+Volume=/etc/localtime:/etc/localtime:ro
+
+[Service]
+Restart=always
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target

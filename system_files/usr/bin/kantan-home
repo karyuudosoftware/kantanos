@@ -1,0 +1,740 @@
+#!/usr/bin/python3
+"""KantanOS Smart home: the house temperature in the top bar, through Home Assistant.
+
+  kantan-home              the Smart home window: connect, choose the thermostat
+  kantan-home status       one line of JSON for the top-bar widget (org.kantanos.home)
+  kantan-home set 21.5     set the thermostat's target temperature
+  kantan-home mode heat    switch the thermostat's mode (heat, off, ... whatever it offers)
+  kantan-home preset eco   switch a preset on (Nest: eco), or "none" to switch it off
+  kantan-home open         open Home Assistant in the web browser
+  kantan-home widget on    put the thermostat in the top bar (off: take it out)
+  kantan-home --self-test
+
+Home Assistant (free, runs in the home) does the talking to the thermostat; a Google Nest
+needs its "Google Nest" integration. It can already run somewhere in the home, or KantanOS
+runs it on this PC (a container, /usr/libexec/kantanos/home-setup).
+
+Signing in uses Home Assistant's own sign-in page in the web browser: the person types their
+Home Assistant name and password there, never here. KantanOS keeps only the sign-in token
+Home Assistant hands back, in ~/.config/kantanos/home.json (readable by this person only).
+Nothing goes anywhere except to that Home Assistant.
+"""
+import json
+import os
+import secrets
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+CONFIG = os.path.expanduser("~/.config/kantanos/home.json")
+SETUP = "/usr/libexec/kantanos/home-setup"
+LOCAL_URL = "http://localhost:8123"
+WIDGET = "org.kantanos.home"
+
+
+# ---- settings -----------------------------------------------------------------------------
+def load():
+    try:
+        with open(CONFIG, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save(cfg):
+    os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
+    tmp = CONFIG + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=1)
+    os.replace(tmp, CONFIG)
+
+
+def clean_url(text):
+    """'homeassistant.local' -> 'http://homeassistant.local:8123' (Home Assistant's usual port)."""
+    t = text.strip().rstrip("/")
+    if not t:
+        return ""
+    if "://" not in t:
+        t = "http://" + t
+    p = urllib.parse.urlsplit(t)
+    if p.port is None and p.scheme == "http" and not p.path:
+        t = f"{p.scheme}://{p.hostname}:8123"
+    return t.rstrip("/")
+
+
+# ---- talking to Home Assistant -----------------------------------------------------------
+class HAError(Exception):
+    def __init__(self, kind, text=""):
+        super().__init__(text or kind)
+        self.kind = kind          # offline, signed_out, missing, error
+
+
+def http(method, url, data=None, token=None, form=False, timeout=10):
+    headers = {"Accept": "application/json"}
+    body = None
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    if data is not None:
+        if form:
+            body = urllib.parse.urlencode(data).encode()
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+        else:
+            body = json.dumps(data).encode()
+            headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read()
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403) or (e.code == 400 and "/auth/token" in url):
+            raise HAError("signed_out", f"Home Assistant said {e.code}")
+        if e.code == 400:
+            raise HAError("error", "The thermostat didn't accept that")
+        if e.code == 404:
+            raise HAError("missing", "not found")
+        raise HAError("error", f"Home Assistant said {e.code}")
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise HAError("offline", str(getattr(e, "reason", e)))
+    try:
+        return json.loads(raw) if raw else None
+    except ValueError:
+        raise HAError("error", "not a Home Assistant answer")
+
+
+def is_home_assistant(url, timeout=5):
+    """True when Home Assistant answers at this address (its sign-in methods list)."""
+    try:
+        r = http("GET", url + "/auth/providers", timeout=timeout)
+    except HAError:
+        return False
+    return isinstance(r, (list, dict))
+
+
+def needs_onboarding(url):
+    """True when this Home Assistant is brand new and nobody has made its account yet."""
+    try:
+        steps = http("GET", url + "/api/onboarding", timeout=5)
+    except HAError:
+        return False
+    return any(s.get("step") == "user" and not s.get("done") for s in steps or [])
+
+
+def access_token(cfg):
+    if cfg.get("access_token") and cfg.get("expires", 0) > time.time() + 60:
+        return cfg["access_token"]
+    if not cfg.get("refresh_token"):
+        raise HAError("signed_out", "not signed in")
+    r = http("POST", cfg["url"] + "/auth/token", {"grant_type": "refresh_token", "client_id": cfg["client_id"],
+                                                 "refresh_token": cfg["refresh_token"]}, form=True)
+    cfg["access_token"] = r["access_token"]
+    cfg["expires"] = time.time() + int(r.get("expires_in", 1800))
+    save(cfg)
+    return cfg["access_token"]
+
+
+def api(cfg, method, path, data=None):
+    return http(method, cfg["url"] + path, data, token=access_token(cfg))
+
+
+def thermostats(cfg):
+    """[(entity_id, name)] of every thermostat (climate entity) Home Assistant knows."""
+    out = []
+    for s in api(cfg, "GET", "/api/states") or []:
+        if s.get("entity_id", "").startswith("climate."):
+            out.append((s["entity_id"], s.get("attributes", {}).get("friendly_name") or s["entity_id"]))
+    return sorted(out, key=lambda x: x[1].lower())
+
+
+def describe(state, unit="°C"):
+    """A Home Assistant climate state -> what the widget shows."""
+    a = state.get("attributes", {})
+    celsius = "F" not in unit
+    return {
+        "state": "ok",
+        "entity": state.get("entity_id", ""),
+        "name": a.get("friendly_name") or "Thermostat",
+        "current": a.get("current_temperature"),
+        "target": a.get("temperature"),
+        "low": a.get("target_temp_low"),
+        "high": a.get("target_temp_high"),
+        "humidity": a.get("current_humidity"),
+        "mode": state.get("state", ""),               # heat, cool, heat_cool, off, unavailable ...
+        "modes": a.get("hvac_modes") or [],
+        "action": a.get("hvac_action") or "",         # heating, cooling, idle, off
+        "preset": a.get("preset_mode") or "",
+        "presets": a.get("preset_modes") or [],
+        "min": a.get("min_temp", 7 if celsius else 45),
+        "max": a.get("max_temp", 35 if celsius else 95),
+        "step": a.get("target_temp_step") or (0.5 if celsius else 1),
+        "unit": unit,
+    }
+
+
+def status():
+    cfg = load()
+    if not cfg.get("refresh_token"):
+        return {"state": "setup"}
+    if not cfg.get("entity"):
+        return {"state": "no_thermostat", "url": cfg.get("url", "")}
+    try:
+        s = api(cfg, "GET", "/api/states/" + cfg["entity"])
+    except HAError as e:
+        return {"state": e.kind if e.kind != "missing" else "no_thermostat", "url": cfg.get("url", ""),
+                "name": cfg.get("entity_name", "")}
+    d = describe(s, cfg.get("unit", "°C"))
+    d["url"] = cfg["url"]
+    return d
+
+
+def call(service, **data):
+    cfg = load()
+    data["entity_id"] = cfg["entity"]
+    api(cfg, "POST", "/api/services/climate/" + service, data)
+
+
+def set_target(value):
+    call("set_temperature", temperature=float(value))
+
+
+# ---- signing in (Home Assistant's own page, in the browser) ---------------------------------
+def authorize_url(url, client_id, redirect, state):
+    return url + "/auth/authorize?" + urllib.parse.urlencode(
+        {"response_type": "code", "client_id": client_id, "redirect_uri": redirect, "state": state})
+
+
+DONE_PAGE = """<!doctype html><meta charset="utf-8"><title>KantanOS Smart home</title>
+<link rel="redirect_uri" href="{redirect}">
+<body style="font: 20px sans-serif; margin: 3em; color: #222">
+<div class="h-app"><b class="p-name">KantanOS Smart home</b></div>
+<p>{text}</p></body>"""
+
+
+def sign_in(url, wait=600, opener=None):
+    """Open Home Assistant's sign-in page; wait for it to send the person back here.
+
+    Home Assistant lets apps identify themselves by an address on this PC (127.0.0.1), so a
+    tiny web server here receives the one-time code and swaps it for a sign-in token."""
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    state = secrets.token_urlsafe(16)
+    got = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            if q.get("state", [""])[0] == state and "code" in q:
+                got["code"] = q["code"][0]
+                text = "Signed in. You can close this tab and go back to Smart home."
+            else:
+                text = "Waiting for Home Assistant…"
+            body = DONE_PAGE.format(redirect=redirect, text=text).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    srv.timeout = 1
+    client_id = f"http://127.0.0.1:{srv.server_address[1]}/"
+    redirect = client_id + "done"
+    link = authorize_url(url, client_id, redirect, state)
+    (opener or open_link)(link)
+    end = time.time() + wait
+    try:
+        while "code" not in got and time.time() < end:
+            srv.handle_request()
+    finally:
+        srv.server_close()
+    if "code" not in got:
+        raise HAError("signed_out", "Sign-in wasn't finished in time")
+    r = http("POST", url + "/auth/token", {"grant_type": "authorization_code", "code": got["code"],
+                                          "client_id": client_id}, form=True)
+    cfg = load()
+    if cfg.get("url") != url:
+        cfg = {}
+    cfg.update(url=url, client_id=client_id, refresh_token=r["refresh_token"], access_token=r["access_token"],
+               expires=time.time() + int(r.get("expires_in", 1800)))
+    try:
+        unit = http("GET", url + "/api/config", token=r["access_token"]).get("unit_system", {}).get("temperature")
+        cfg["unit"] = unit or "°C"
+    except HAError:
+        cfg["unit"] = "°C"
+    save(cfg)
+    return cfg
+
+
+def sign_out():
+    cfg = load()
+    if cfg.get("refresh_token"):
+        try:   # tell Home Assistant to forget this sign-in too
+            http("POST", cfg["url"] + "/auth/revoke", {"token": cfg["refresh_token"]}, form=True, timeout=5)
+        except HAError:
+            pass
+    try:
+        os.remove(CONFIG)
+    except OSError:
+        pass
+    show_widget(False)
+
+
+def open_link(link):
+    subprocess.Popen(["xdg-open", link], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+# ---- finding Home Assistant in the home ------------------------------------------------------
+def parse_avahi(text):
+    """`avahi-browse -rpt _home-assistant._tcp` -> [(name, url)], IPv4 first, no repeats."""
+    found = []
+    for line in text.splitlines():
+        f = line.split(";")
+        if len(f) < 10 or f[0] != "=":
+            continue
+        name, addr, port, txt = f[3], f[7], f[8], f[9]
+        txt = dict(kv.strip('"').split("=", 1) for kv in txt.split('" "') if "=" in kv)
+        url = (txt.get("internal_url") or txt.get("base_url") or "").strip('"').rstrip("/")
+        if not url:
+            host = f"[{addr}]" if ":" in addr else addr
+            url = f"http://{host}:{port}"
+        name = name.replace("\\032", " ")
+        found.append((f[2] != "IPv4", name, url))
+    out, seen = [], set()
+    for _v6, name, url in sorted(found):
+        if name not in seen:
+            seen.add(name)
+            out.append((name, url))
+    return out
+
+
+def discover():
+    try:
+        r = subprocess.run(["avahi-browse", "-rpt", "_home-assistant._tcp"], capture_output=True, text=True,
+                           timeout=8, stdin=subprocess.DEVNULL)
+        found = parse_avahi(r.stdout)
+    except (OSError, subprocess.TimeoutExpired):
+        found = []
+    if not found:
+        for url in ("http://homeassistant.local:8123", LOCAL_URL):
+            if is_home_assistant(url, timeout=3):
+                found.append(("Home Assistant", url))
+                break
+    return found
+
+
+def local_running():
+    try:
+        r = subprocess.run(["systemctl", "is-active", "kantanos-homeassistant.service"], capture_output=True,
+                           text=True, stdin=subprocess.DEVNULL, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.stdout.strip() == "active"
+
+
+# ---- the top-bar widget -------------------------------------------------------------------
+WIDGET_JS = """
+var ps = panels();
+for (var i = 0; i < ps.length; i++) {
+    if (ps[i].location !== "top") continue;
+    var ws = ps[i].widgets(), mine = null, after = null, tray = null;
+    for (var j = 0; j < ws.length; j++) {
+        if (ws[j].type === "%(id)s") mine = ws[j];
+        if (ws[j].type === "org.kantanos.weather") after = ws[j];
+        if (ws[j].type === "org.kde.plasma.systemtray") tray = ws[j];
+    }
+    if (%(show)s && !mine) {
+        var at = after ? after.index + 1 : (tray ? tray.index : -1);
+        var w = ps[i].addWidget("%(id)s");
+        if (at >= 0) w.index = at;
+    }
+    if (!%(show)s && mine) mine.remove();
+    break;
+}
+"""
+
+
+def show_widget(show=True):
+    js = WIDGET_JS % {"id": WIDGET, "show": "true" if show else "false"}
+    try:
+        subprocess.run(["gdbus", "call", "--session", "--dest", "org.kde.plasmashell", "--object-path", "/PlasmaShell",
+                        "--method", "org.kde.PlasmaShell.evaluateScript", js], capture_output=True, timeout=20,
+                       stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+# ---- the window ----------------------------------------------------------------------------
+NEST_STEPS = (
+    "<b>Add your Google Nest thermostat to Home Assistant</b><ol>"
+    "<li>Press <b>Add Google Nest</b>. Home Assistant opens in the browser and guides you through it.</li>"
+    "<li>Google asks for a one-off Device Access registration (US$5, paid to Google) and a free Google "
+    "Cloud project. Home Assistant shows each step.</li>"
+    "<li>In Google Cloud, set the sign-in screen to <b>In production</b> (the <i>Publish app</i> button). "
+    "Otherwise Google signs Home Assistant out every 7 days.</li></ol>"
+    "Then come back here and press <b>Check again</b>.")
+
+
+def window():
+    from PySide6.QtCore import QObject, Qt, Signal
+    from PySide6.QtGui import QFont, QIcon
+    from PySide6.QtWidgets import (QApplication, QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+                                   QRadioButton, QVBoxLayout, QWidget)
+
+    class Bridge(QObject):
+        found = Signal(list)
+        step = Signal(str)
+        done = Signal(str, str)           # what finished, error text ("" when it worked)
+        stats = Signal(list)
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setDesktopFileName("kantanos-home")
+    w = QWidget()
+    w.setWindowTitle("Smart home")
+    w.setWindowIcon(QIcon.fromTheme("temperature-normal"))
+    w.resize(760, 620)
+    f = w.font()
+    f.setPointSizeF(f.pointSizeF() * 1.3)
+    w.setFont(f)
+    outer = QVBoxLayout(w)
+    outer.setContentsMargins(48, 36, 48, 30)
+    outer.setSpacing(14)
+    head = QLabel("Smart home")
+    hf = QFont(w.font())
+    hf.setPointSizeF(hf.pointSizeF() * 1.6)
+    hf.setBold(True)
+    head.setFont(hf)
+    outer.addWidget(head)
+    body = QWidget()
+    outer.addWidget(body, 1)
+    status_l = QLabel("")
+    status_l.setWordWrap(True)
+    status_l.setTextFormat(Qt.TextFormat.RichText)
+    outer.addWidget(status_l)
+    buttons = QHBoxLayout()
+    outer.addLayout(buttons)
+    bridge = Bridge(w)
+    w.busy = False
+
+    def label(text):
+        lab = QLabel(text)
+        lab.setWordWrap(True)
+        lab.setTextFormat(Qt.TextFormat.RichText)
+        lab.setOpenExternalLinks(True)
+        return lab
+
+    def clear():
+        nonlocal body
+        body.setParent(None)
+        body.deleteLater()
+        body = QWidget()
+        outer.insertWidget(1, body, 1)
+        while buttons.count():
+            item = buttons.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        status_l.setText("")
+        lay = QVBoxLayout(body)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(14)
+        return lay
+
+    def button(text, icon, slot, default=False):
+        b = QPushButton(QIcon.fromTheme(icon), text)
+        b.clicked.connect(slot)
+        b.setDefault(default)
+        buttons.addWidget(b)
+        return b
+
+    def in_background(name, fn):
+        w.busy = True
+
+        def run():
+            try:
+                fn()
+                bridge.done.emit(name, "")
+            except HAError as e:
+                bridge.done.emit(name, {"offline": "Can't reach Home Assistant at that address.",
+                                        "signed_out": f"Home Assistant didn't sign you in ({e}).",
+                                        }.get(e.kind, str(e)))
+            except Exception as e:      # shown to the person, never a crash
+                bridge.done.emit(name, str(e))
+        threading.Thread(target=run, daemon=True).start()
+
+    # -- page 1: where is Home Assistant? --
+    def page_connect():
+        lay = clear()
+        lay.addWidget(label(
+            "See and change the house temperature from the top bar. KantanOS uses <b>Home Assistant</b> "
+            "(free software that runs in your home) to talk to your thermostat, such as a Google Nest."))
+        have = QRadioButton("Home Assistant already runs in this home")
+        here = QRadioButton("Run Home Assistant on this PC (downloads about 600 MB; it works while this PC is on)")
+        lay.addWidget(have)
+        row = QHBoxLayout()
+        row.setContentsMargins(36, 0, 0, 0)
+        addr = QLineEdit()
+        addr.setPlaceholderText("Its address, like homeassistant.local or 192.168.1.20")
+        found = QComboBox()
+        found.setVisible(False)
+        row.addWidget(addr, 1)
+        row.addWidget(found, 1)
+        lay.addLayout(row)
+        lay.addWidget(here)
+        lay.addStretch(1)
+        have.setChecked(True)
+        if local_running():
+            addr.setText(LOCAL_URL)
+        w.page = {"have": have, "here": here, "addr": addr, "found": found}
+
+        def got(items):
+            if w.page.get("addr") is not addr:
+                return
+            if not items:
+                status_l.setText("Didn't find Home Assistant by itself. Type its address above.")
+                return
+            found.clear()
+            for name, url in items:
+                found.addItem(f"{name} ({url})", url)
+            found.addItem("Somewhere else…", "")
+            found.setVisible(True)
+            addr.setVisible(False)
+            status_l.setText("")
+
+        def pick(_i):
+            url = found.currentData()
+            addr.setVisible(not url)
+            addr.setText(url or "")
+            if not url:
+                addr.setFocus()
+        found.currentIndexChanged.connect(pick)
+        w.on_found = got
+        if not addr.text():
+            status_l.setText("Looking for Home Assistant in your home…")
+            threading.Thread(target=lambda: bridge.found.emit(discover()), daemon=True).start()
+        button("Close", "window-close", w.close)
+        buttons.insertStretch(0, 1)
+        button("Next", "go-next", next_from_connect, default=True)
+
+    def next_from_connect():
+        p = w.page
+        if p["here"].isChecked():
+            status_l.setText("<b>Setting up Home Assistant on this PC…</b>")
+
+            def work():
+                pr = subprocess.Popen(["pkexec", SETUP, "install"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                      text=True, stdin=subprocess.DEVNULL)
+                tail = []
+                for line in pr.stdout:
+                    line = line.strip()
+                    tail = (tail + [line])[-4:]
+                    if line.startswith("STEP: "):
+                        bridge.step.emit(line[6:])
+                if pr.wait() != 0:
+                    raise HAError("error", "Setting up didn't work: " + " ".join(tail))
+                bridge.step.emit("Starting Home Assistant (the first start takes a few minutes)…")
+                for _ in range(120):
+                    if is_home_assistant(LOCAL_URL, timeout=3):
+                        w.url = LOCAL_URL
+                        return
+                    time.sleep(5)
+                raise HAError("offline", "Home Assistant didn't start")
+            in_background("installed", work)
+        else:
+            url = clean_url(p["addr"].text())
+            if not url:
+                status_l.setText("Type the address of your Home Assistant, or choose “Run Home Assistant on this PC”.")
+                return
+            status_l.setText("<b>Checking…</b>")
+
+            def work():
+                for u in [url] + ([url.replace("http://", "https://", 1)] if url.startswith("http://") else []):
+                    if is_home_assistant(u):
+                        w.url = u
+                        return
+                raise HAError("offline")
+            in_background("checked", work)
+
+    # -- page 2: create the account (new Home Assistant) and sign in --
+    def page_sign_in():
+        lay = clear()
+        new = needs_onboarding(w.url)
+        if new:
+            lay.addWidget(label(
+                "Home Assistant is running. First, make its account for your home:<ol>"
+                "<li>Press <b>Open Home Assistant</b>. It opens in the web browser.</li>"
+                "<li>Follow its welcome steps: your home's name, a user name and a password "
+                "(keep the password somewhere safe), and where your home is.</li>"
+                "<li>Come back here and press <b>Sign in</b>.</li></ol>"))
+        else:
+            lay.addWidget(label(f"Found Home Assistant at <b>{w.url}</b>."))
+        lay.addWidget(label(
+            "<b>Sign in</b> opens Home Assistant's own sign-in page in the browser. Type your Home Assistant "
+            "name and password there. KantanOS never sees the password; it keeps only a sign-in key "
+            "that Home Assistant gives it."))
+        lay.addStretch(1)
+        button("Back", "go-previous", page_connect)
+        buttons.insertStretch(1, 1)
+        if new:
+            button("Open Home Assistant", "internet-web-browser", lambda: open_link(w.url))
+        button("Sign in", "dialog-password", do_sign_in, default=True)
+
+    def do_sign_in():
+        status_l.setText("<b>Finish signing in in the web browser…</b>")
+        in_background("signed_in", lambda: sign_in(w.url))
+
+    # -- page 3: choose the thermostat --
+    def page_thermostat():
+        lay = clear()
+        cfg = load()
+        lay.addWidget(label(f"Connected to Home Assistant at <b>{cfg.get('url', '')}</b>."))
+        w.page = {"cfg": cfg}
+        status_l.setText("Looking for thermostats…")
+
+        def got(items):
+            if w.page.get("cfg") is not cfg:
+                return
+            status_l.setText("")
+            if not items:
+                lay.addWidget(label(NEST_STEPS))
+                lay.addStretch(1)
+                return
+            lay.addWidget(label("Show this thermostat in the top bar:"))
+            box = QComboBox()
+            for eid, name in items:
+                box.addItem(name, eid)
+            i = box.findData(cfg.get("entity"))
+            box.setCurrentIndex(max(i, 0))
+            lay.addWidget(box)
+            lay.addWidget(label("Click the temperature in the top bar to change it, or to switch the heating "
+                                "on or off."))
+            lay.addStretch(1)
+            w.page["box"] = box
+            choose()
+            box.currentIndexChanged.connect(lambda _i: choose())
+
+        def choose():
+            box = w.page.get("box")
+            if box is None:
+                return
+            c = load()
+            c["entity"] = box.currentData()
+            c["entity_name"] = box.currentText()
+            save(c)
+            show_widget(True)
+            status_l.setText(f"✓ {box.currentText()} is in the top bar.")
+
+        w.on_stats = got
+
+        def look():
+            try:
+                bridge.stats.emit(thermostats(load()))
+            except HAError:
+                bridge.stats.emit([])
+        threading.Thread(target=look, daemon=True).start()
+
+        def leave():
+            sign_out()
+            page_connect()
+        button("Sign out", "system-log-out", leave)
+        buttons.addStretch(1)
+        button("Add Google Nest", "list-add",
+               lambda: open_link(cfg["url"] + "/config/integrations/dashboard/add?domain=nest"))
+        button("Check again", "view-refresh", page_thermostat)
+        button("Open Home Assistant", "internet-web-browser", lambda: open_link(cfg["url"]))
+        button("Done", "dialog-ok", w.close, default=True)
+
+    def finished(name, error):
+        w.busy = False
+        if error:
+            status_l.setText(f"<b>{error}</b>")
+            return
+        if name in ("checked", "installed"):
+            page_sign_in()
+        elif name == "signed_in":
+            page_thermostat()
+
+    bridge.step.connect(lambda t: status_l.setText(f"<b>{t}</b>"))
+    w.on_found = w.on_stats = lambda items: None
+    bridge.found.connect(lambda items: w.on_found(items))
+    bridge.stats.connect(lambda items: w.on_stats(items))
+    bridge.done.connect(finished)
+    if load().get("refresh_token"):
+        page_thermostat()
+    else:
+        page_connect()
+    w.show()
+    return app, w
+
+
+# ---- command line ----------------------------------------------------------------------------
+def self_test():
+    import tempfile
+    global CONFIG
+    assert clean_url("homeassistant.local") == "http://homeassistant.local:8123"
+    assert clean_url("https://ha.example.org/") == "https://ha.example.org"
+    assert clean_url("192.168.1.20:8123") == "http://192.168.1.20:8123"
+    av = ('+;eth0;IPv4;Home;_home-assistant._tcp;local\n'
+          '=;eth0;IPv6;Home;_home-assistant._tcp;local;ha.local;fe80::1;8123;"version=2026.11.0"\n'
+          '=;eth0;IPv4;Home;_home-assistant._tcp;local;ha.local;192.168.1.5;8123;'
+          '"internal_url=http://192.168.1.5:8123" "version=2026.11.0"\n')
+    assert parse_avahi(av) == [("Home", "http://192.168.1.5:8123")], parse_avahi(av)
+    d = describe({"entity_id": "climate.hall", "state": "heat",
+                  "attributes": {"friendly_name": "Hall", "current_temperature": 19.5, "temperature": 21,
+                                 "hvac_modes": ["heat", "off"], "hvac_action": "heating",
+                                 "preset_modes": ["ECO", "NONE"], "preset_mode": "NONE"}})
+    assert d["current"] == 19.5 and d["target"] == 21 and d["step"] == 0.5 and d["action"] == "heating", d
+    link = authorize_url("http://ha:8123", "http://127.0.0.1:5/", "http://127.0.0.1:5/done", "s")
+    assert link.startswith("http://ha:8123/auth/authorize?response_type=code&client_id=http%3A%2F%2F127.0.0.1"), link
+    with tempfile.TemporaryDirectory() as tmp:
+        CONFIG = os.path.join(tmp, "k", "home.json")
+        assert status() == {"state": "setup"}
+        save({"url": "http://127.0.0.1:9", "client_id": "x", "refresh_token": "r", "entity": "climate.hall"})
+        assert oct(os.stat(CONFIG).st_mode & 0o777) == "0o600"
+        assert status()["state"] == "offline", status()
+    assert os.path.exists("/usr/share/kantanos/home/kantanos-homeassistant.container") or "--no-files" in sys.argv
+    if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+        CONFIG = os.path.join(tempfile.mkdtemp(), "home.json")
+        os.environ["PATH"] = "/nonexistent"     # no avahi-browse: the search finds nothing quickly
+        _app, w = window()
+        assert w.windowTitle() == "Smart home"
+    print("ok")
+
+
+def main():
+    args = sys.argv[1:]
+    cmd = args[0] if args else ""
+    if cmd == "--self-test":
+        self_test()
+    elif cmd == "status":
+        print(json.dumps(status()))
+    elif cmd in ("set", "mode", "preset") and len(args) == 2:
+        try:
+            if cmd == "set":
+                set_target(args[1])
+            elif cmd == "mode":
+                call("set_hvac_mode", hvac_mode=args[1])
+            else:
+                call("set_preset_mode", preset_mode=args[1])
+        except HAError as e:
+            print(e, file=sys.stderr)
+            sys.exit(1)
+    elif cmd == "widget" and len(args) == 2:
+        show_widget(args[1] != "off")
+    elif cmd == "open":
+        open_link(load().get("url") or LOCAL_URL)
+    elif cmd in ("", "setup"):
+        app, _w = window()
+        sys.exit(app.exec())
+    else:
+        print(__doc__)
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()

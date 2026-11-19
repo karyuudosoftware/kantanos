@@ -129,7 +129,10 @@ on the real PC.*
 - [x] Messaging: Signal, Telegram, Teams (Teams for Linux), WhatsApp (ZapZap), Discord in
       Welcome; Messenger and Instagram as website tiles ("Add shortcut"). WhatsApp for
       Windows only comes from the Microsoft Store, which Wine can't run.
-- [ ] Smart home: house temperature widget for a Nest thermostat through Home Assistant.
+- [x] Smart home: house temperature in the top bar through Home Assistant (one already in the
+      home, or run on this PC). Click to set the temperature, Heat/Off, Eco. Tested in the VM
+      against Home Assistant's demo thermostats. Still to do with the owner: the real Nest
+      (Google Device Access, US$5) and, if wanted, Home Assistant on the real PC.
 
 ## AI and accessibility
 

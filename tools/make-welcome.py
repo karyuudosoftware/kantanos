@@ -100,6 +100,8 @@ doc += screen("Welcome!", "Get started with KantanOS", "".join([
            "nohup setsid kdeconnect-app >&/dev/null"),
     action("android", "Android apps", "Run Android apps on this PC in their own windows, listed in your apps menu. Set up once (downloads about 1 GB), then double-click any .apk file to install it.",
            "nohup setsid kantan-android setup >&/dev/null"),
+    action("home", "Smart home", "See and change the house temperature from the top bar, for example a Google Nest thermostat, through Home Assistant (free; runs in your home or on this PC).",
+           "nohup setsid kantan-home >&/dev/null"),
     action("nas", "Connect your NAS", "Make the shared folders on your NAS (for example a TrueNAS box) work like normal folders in every app. Asks for the NAS user name and password once.",
            f"ujust kantan-nas-connect; {PAUSE}"),
     action("wake", "Wake this PC from another device", "Shows the details a wake-up app needs to switch this PC on over the network (Wake-on-LAN).",
