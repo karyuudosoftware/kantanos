@@ -37,7 +37,7 @@ CHAT = [
     ("com.rtosta.zapzap", "WhatsApp (ZapZap)", "WhatsApp in its own window, with notifications. Link it to your phone once by scanning the code with WhatsApp (Settings → Linked devices)."),
 ]
 GAMES = [
-    ("com.heroicgameslauncher.hgl", "Heroic Games Launcher", "Epic Games Store, GOG and Amazon Prime Gaming. In Heroic, open a game's menu and choose \"Add to Steam\" to see it in Game Mode."),
+    ("com.heroicgameslauncher.hgl", "Heroic Games Launcher", "Epic Games Store, GOG and Amazon Prime Gaming. Games you install appear in Game Mode by themselves, with their box art."),
 ]
 TOOLS = [
     ("com.github.shundhammer.qdirstat", "QDirStat", "See which folders use the most space, as a sorted list (like TreeSize on Windows)."),

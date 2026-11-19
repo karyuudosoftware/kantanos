@@ -1,0 +1,9 @@
+[Unit]
+Description=KantanOS: put newly installed games into Game Mode (Steam), take uninstalled ones out
+Documentation=file:///usr/libexec/kantanos/games-sync
+
+[Service]
+Type=oneshot
+# A store often writes its list several times while installing: wait for it to settle
+ExecStartPre=/usr/bin/sleep 20
+ExecStart=/usr/libexec/kantanos/games-sync --quiet

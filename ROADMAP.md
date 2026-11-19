@@ -33,6 +33,9 @@ smart home, Local AI extras, Game Mode library sync, installer fixes, the Files 
 Kan-chan model idea, and the Lite edition last. Real-PC checks (sound, Atmos, DisplayPort,
 the Windows VM install, cloud backups) whenever the owner is at the PC.
 
+Later, when the owner has sketched some ideas: redesign the KantanOS startup screen (the look
+is the owner's call; wait for the sketches before changing anything).
+
 ## Next
 
 - [x] NAS: `ujust kantan-nas-connect` (or Welcome) connects SMB shares as normal folders.
@@ -66,7 +69,17 @@ the Windows VM install, cloud backups) whenever the owner is at the PC.
       and show genres, "one show all day", networks, languages). Guide for 3 days, wildcard
       search for channels and shows, favourites, the family's own M3U/XMLTV provider, and
       recordings (one show or every episode) by a background service that keeps the PC awake.
-- [~] **Game Mode:** Welcome → Games installs Heroic (Epic, GOG, Amazon → "Add to Steam") and points to Lutris for EA/Ubisoft; automatic library sync still to do.
+- [x] **Game Mode:** Welcome → Games installs Heroic (Epic, GOG, Amazon) and points to Lutris for
+      EA/Ubisoft/Battle.net. **Library sync** (`/usr/libexec/kantanos/games-sync`): installed
+      Heroic and Lutris games (and Retro Games once set up) appear in Steam's Game Mode by
+      themselves, sorted into Epic / GOG / Amazon / Lutris collections, with the stores' box art;
+      uninstalled ones go again. The shortcut is exactly the one Heroic's own "Add to Steam" makes
+      (same id), and the person's own shortcuts are never touched or doubled. Runs when Heroic's or
+      Lutris's list changes (user path unit `kantanos-games-sync.path`) while Steam is closed, and
+      from the Game Mode tile (restarting Steam only if it was open and something changed). One
+      backup of Steam's list is kept (`shortcuts.vdf.kantanos-backup`). Tested: Steam's file
+      checked with the independent `vdf` reader, and live in the VM (a pretend Heroic install
+      reached Steam's list 20 s later). Not tried with a real Steam account and real games yet.
 - [~] **Retro Games:** Boxshelf (3D box-art shelf, GPL-3.0, by sassiestrhihno) as the
       LaunchBox replacement, in front of Flathub emulators (RetroArch, DuckStation, PCSX2,
       Dolphin, PPSSPP, melonDS, Azahar, Flycast; Cemu, RPCS3, xemu optional). The tile sets it

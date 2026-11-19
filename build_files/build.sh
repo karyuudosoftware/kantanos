@@ -116,6 +116,10 @@ dnf5 -y install mpv-libs
 # The recorder runs for everyone who signs in, idle until something is due.
 systemctl --global enable kantanos-tv-recorder.service
 
+# Game Mode library sync (/usr/libexec/kantanos/games-sync): games installed in Heroic or Lutris
+# appear in Steam's Game Mode by themselves (watched for every account; idle otherwise).
+systemctl --global enable kantanos-games-sync.path
+
 # Virus scanning: ClamAV, its list of known viruses kept up to date in the background, and
 # "Scan for viruses" in Files (/usr/libexec/kantanos/virus-scan).
 dnf5 -y install clamav clamav-update

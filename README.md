@@ -111,6 +111,9 @@ A USB 2 stick is too slow for this OS; use USB 3 or, better, an SSD.
 - Recipe book (`kantan-recipes`): recipes as files in `~/Documents/Recipes`, added by typing,
   from a website (schema.org Recipe data) or a photo of a cookbook page; scaling; full-screen
   cooking view with timers.
+- Game Mode library sync (`/usr/libexec/kantanos/games-sync`, `kantanos-games-sync.path`): games
+  installed in Heroic or Lutris appear in Steam's Game Mode with their art, and leave when
+  uninstalled; the Game Mode tile runs it before opening Steam.
 - Smart home (`kantan-home`, "Smart home" in the app menu and Welcome): the house temperature
   in the top bar (widget `org.kantanos.home`), click to change it or switch the heating on/off.
   Talks to Home Assistant (already in the home, found by zeroconf, or run on this PC as the

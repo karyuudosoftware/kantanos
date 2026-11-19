@@ -1,0 +1,13 @@
+[Unit]
+Description=KantanOS: watch Heroic and Lutris for installed or uninstalled games
+
+[Path]
+PathChanged=%h/.var/app/com.heroicgameslauncher.hgl/config/heroic/legendaryConfig/legendary/installed.json
+PathChanged=%h/.var/app/com.heroicgameslauncher.hgl/config/heroic/gog_store/installed.json
+PathChanged=%h/.var/app/com.heroicgameslauncher.hgl/config/heroic/nile_config/nile/installed.json
+PathChanged=%h/.var/app/com.heroicgameslauncher.hgl/config/heroic/sideload_apps/library.json
+PathChanged=%h/.local/share/lutris/pga.db
+PathChanged=%h/.local/share/boxshelf/Boxshelf.AppImage
+
+[Install]
+WantedBy=default.target

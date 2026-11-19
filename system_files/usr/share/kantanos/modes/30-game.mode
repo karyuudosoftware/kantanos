@@ -4,5 +4,5 @@ Name[ja]=ゲームモード
 Comment=Your game library, full screen, for a controller
 Comment[ja]=コントローラーで遊べる全画面のゲームライブラリ
 Icon=game
-Exec=bazzite-steam -gamepadui
+Exec=/usr/libexec/kantanos/games-sync --game-mode
 Order=30

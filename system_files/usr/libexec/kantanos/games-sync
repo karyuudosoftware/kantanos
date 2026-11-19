@@ -1,0 +1,453 @@
+#!/usr/bin/python3
+"""KantanOS Game Mode library sync: games installed in Heroic (Epic, GOG, Amazon, added by hand)
+and Lutris (EA app, Ubisoft Connect, Battle.net, ...) appear in Steam's Game Mode by themselves,
+with their box art, and leave again when they're uninstalled.
+
+  games-sync               bring Steam's list up to date (only while Steam is closed: Steam
+                           rewrites its list when it exits; otherwise the Game Mode tile does it)
+  games-sync --game-mode   the Game Mode tile: bring the list up to date (restarting Steam if it
+                           is open and something changed), then open Steam's Game Mode
+  games-sync --list        what would be in Game Mode
+  games-sync --self-test
+
+Only shortcuts this program made are ever changed or removed (it remembers them in
+~/.local/state/kantanos/games-sync.json); shortcuts the person made, including Heroic's own
+"Add to Steam" ones, are left alone and never doubled.
+Art comes from the pictures Heroic and Lutris already have (the stores' own box art).
+"""
+import binascii
+import glob
+import json
+import os
+import re
+import shutil
+import sqlite3
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+
+HOME = os.path.expanduser("~")
+STEAM_DIRS = [os.path.join(HOME, ".local/share/Steam"), os.path.join(HOME, ".steam/steam"),
+              os.path.join(HOME, ".var/app/com.valvesoftware.Steam/data/Steam")]
+HEROIC = os.path.join(HOME, ".var/app/com.heroicgameslauncher.hgl/config/heroic")
+LUTRIS_DB = [os.path.join(HOME, ".local/share/lutris/pga.db"),
+             os.path.join(HOME, ".var/app/net.lutris.Lutris/data/lutris/pga.db")]
+STATE = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.join(HOME, ".local/state")), "kantanos",
+                     "games-sync.json")
+HEROIC_RUN = ["flatpak", "run", "com.heroicgameslauncher.hgl", "--no-gui", "--no-sandbox"]
+STEAM_GAME_MODE = ["bazzite-steam", "-gamepadui"]
+RUNNERS = {"legendary": "Epic", "gog": "GOG", "nile": "Amazon", "sideload": "Heroic"}
+
+
+# ---- Steam's binary list of shortcuts (shortcuts.vdf) ----------------------------------------------
+def vdf_load(data):
+    """Binary VDF -> nested dicts (insertion order kept)."""
+    pos = 0
+
+    def cstr():
+        nonlocal pos
+        end = data.index(b"\0", pos)
+        s = data[pos:end].decode("utf-8", "replace")
+        pos = end + 1
+        return s
+
+    def table():
+        nonlocal pos
+        out = {}
+        while True:
+            t = data[pos]
+            pos += 1
+            if t == 0x08:
+                return out
+            key = cstr()
+            if t == 0x00:
+                out[key] = table()
+            elif t == 0x01:
+                out[key] = cstr()
+            elif t == 0x02:
+                out[key] = struct.unpack_from("<i", data, pos)[0]
+                pos += 4
+            elif t == 0x03:
+                out[key] = struct.unpack_from("<f", data, pos)[0]
+                pos += 4
+            elif t == 0x07:
+                out[key] = ("u64", struct.unpack_from("<Q", data, pos)[0])
+                pos += 8
+            else:
+                raise ValueError(f"unknown VDF type {t:#x}")
+    if not data:
+        return {}
+    return table()
+
+
+def vdf_dump(d):
+    out = bytearray()
+
+    def table(m):
+        for k, v in m.items():
+            key = str(k).encode() + b"\0"
+            if isinstance(v, dict):
+                out.extend(b"\0" + key)
+                table(v)
+            elif isinstance(v, bool) or isinstance(v, int):
+                out.extend(b"\x02" + key + struct.pack("<i", int(v)))
+            elif isinstance(v, float):
+                out.extend(b"\x03" + key + struct.pack("<f", v))
+            elif isinstance(v, tuple) and v[0] == "u64":
+                out.extend(b"\x07" + key + struct.pack("<Q", v[1]))
+            else:
+                out.extend(b"\x01" + key + str(v).encode() + b"\0")
+        out.append(0x08)
+    table(d)
+    return bytes(out)
+
+
+def shortcut_id(exe, name):
+    """Steam's id for a shortcut (the unsigned form names its artwork files)."""
+    return (binascii.crc32((exe + name).encode()) & 0xFFFFFFFF) | 0x80000000
+
+
+def signed(n):
+    return n - (1 << 32) if n >= 1 << 31 else n
+
+
+# ---- which Steam account ------------------------------------------------------------------------
+def steam_root():
+    for d in STEAM_DIRS:
+        if os.path.isdir(os.path.join(d, "userdata")):
+            return os.path.realpath(d)
+    return None
+
+
+def steam_user(root):
+    """The account folder (userdata/<id>) of whoever used Steam last on this PC."""
+    users = [d for d in glob.glob(os.path.join(root, "userdata", "*")) if os.path.basename(d).isdigit()
+             and os.path.basename(d) != "0"]
+    if not users:
+        return None
+    try:
+        text = open(os.path.join(root, "config", "loginusers.vdf"), encoding="utf-8", errors="replace").read()
+        for sid, body in re.findall(r'"(\d{17})"\s*\{([^}]*)\}', text):
+            if re.search(r'"MostRecent"\s*"1"', body):
+                acc = os.path.join(root, "userdata", str(int(sid) - 76561197960265728))
+                if os.path.isdir(acc):
+                    return acc
+    except OSError:
+        pass
+    return max(users, key=lambda d: os.path.getmtime(d))
+
+
+def steam_running():
+    return subprocess.run(["pgrep", "-x", "steam"], capture_output=True).returncode == 0
+
+
+# ---- what's installed -----------------------------------------------------------------------------
+def read_json(path, default=None):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def library_entries(path):
+    """Heroic's store cache: a list of games (several shapes across Heroic versions)."""
+    d = read_json(path, {})
+    if isinstance(d, list):
+        return d
+    for k in ("library", "games"):
+        if isinstance(d.get(k), list):
+            return d[k]
+    return []
+
+
+def heroic_games(base=HEROIC):
+    out = []
+    # what's installed, per store
+    epic = read_json(os.path.join(base, "legendaryConfig/legendary/installed.json"), {}) or {}
+    gog = (read_json(os.path.join(base, "gog_store/installed.json"), {}) or {}).get("installed", [])
+    nile = read_json(os.path.join(base, "nile_config/nile/installed.json"), []) or []
+    installed = {("legendary", k): v.get("title", k) for k, v in epic.items() if isinstance(v, dict)}
+    installed.update({("gog", g.get("appName")): "" for g in gog if isinstance(g, dict) and g.get("appName")})
+    installed.update({("nile", g.get("id")): "" for g in nile if isinstance(g, dict) and g.get("id")})
+    # titles and art from the store caches
+    info = {}
+    for runner, cache in (("legendary", "legendary_library.json"), ("gog", "gog_library.json"),
+                          ("nile", "nile_library.json")):
+        for g in library_entries(os.path.join(base, "store_cache", cache)):
+            if isinstance(g, dict) and g.get("app_name"):
+                info[(runner, g["app_name"])] = g
+    for g in library_entries(os.path.join(base, "sideload_apps", "library.json")):
+        if isinstance(g, dict) and g.get("app_name") and g.get("is_installed", True):
+            installed[("sideload", g["app_name"])] = g.get("title", "")
+            info[("sideload", g["app_name"])] = g
+    for (runner, app), title in installed.items():
+        g = info.get((runner, app), {})
+        title = g.get("title") or title or app
+        out.append({"source": RUNNERS[runner], "key": f"heroic:{runner}:{app}", "name": title,
+                    "exe": HEROIC_RUN[0],
+                    "options": " ".join(HEROIC_RUN[1:]) + f' "heroic://launch?appName={app}&runner={runner}"',
+                    "match": [f"heroic://launch/{runner}/{app}\"", f"appName={app}&runner={runner}\""],
+                    "art": {"tall": g.get("art_square") or "", "wide": g.get("art_cover") or "",
+                            "logo": g.get("art_logo") or "", "hero": g.get("art_background") or g.get("art_cover") or ""}})
+    return out
+
+
+def lutris_games(paths=LUTRIS_DB):
+    out = []
+    for db in paths:
+        if not os.path.isfile(db):
+            continue
+        flatpak = "/.var/app/" in db
+        data = os.path.dirname(db)
+        try:
+            con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+            rows = con.execute("SELECT id, name, slug, runner FROM games WHERE installed = 1").fetchall()
+            con.close()
+        except sqlite3.Error:
+            continue
+        for gid, name, slug, runner in rows:
+            if runner == "steam":            # already in Steam
+                continue
+            art = {}
+            for kind, folder in (("tall", "coverart"), ("wide", "banners")):
+                for d in (os.path.join(data, folder), os.path.join(HOME, ".cache/lutris", folder)):
+                    hit = glob.glob(os.path.join(d, f"{slug}.*"))
+                    if hit:
+                        art[kind] = hit[0]
+                        break
+            exe, opts = (("flatpak", f"run net.lutris.Lutris lutris:rungameid/{gid}") if flatpak
+                         else ("lutris", f"lutris:rungameid/{gid}"))
+            out.append({"source": "Lutris", "key": f"lutris:{gid}", "name": name, "exe": exe, "options": opts,
+                        "match": [f"lutris:rungameid/{gid}"], "art": art})
+    return out
+
+
+def kantanos_entries():
+    """KantanOS's own controller-friendly launchers, once they're set up."""
+    out = []
+    if os.path.exists(os.path.join(HOME, ".local/share/boxshelf/Boxshelf.AppImage")):
+        out.append({"source": "KantanOS", "key": "kantanos:retro", "name": "Retro Games",
+                    "exe": "/usr/libexec/kantanos/retro", "options": "", "match": ["/usr/libexec/kantanos/retro"],
+                    "art": {}})
+    return out
+
+
+def wanted():
+    return heroic_games() + lutris_games() + kantanos_entries()
+
+
+# ---- bringing Steam's list up to date --------------------------------------------------------------
+def plan(shortcuts, games, state):
+    """-> (new shortcuts table, added names, removed names, art jobs). Pure: no files touched."""
+    mine = set(state.get("ids", []))
+    entries = [v for v in shortcuts.get("shortcuts", {}).values() if isinstance(v, dict)]
+    theirs = [e for e in entries if (e.get("appid", 0) & 0xFFFFFFFF) not in mine]
+    ours = {e.get("appid", 0) & 0xFFFFFFFF: e for e in entries if (e.get("appid", 0) & 0xFFFFFFFF) in mine}
+    by_them = " ".join(f'{e.get("Exe", "")} {e.get("LaunchOptions", "")}' for e in theirs)
+    keep, added, art, ids = [], [], [], []
+    for g in games:
+        if any(m in by_them for m in g["match"]):
+            continue                        # the person (or Heroic) already added it
+        exe = f'"{g["exe"]}"'
+        aid = shortcut_id(exe, g["name"])
+        if aid in ids:
+            continue
+        ids.append(aid)
+        e = ours.get(aid) or {}
+        new = {"appid": signed(aid), "AppName": g["name"], "Exe": exe, "StartDir": '"' + HOME + '"',
+               "icon": "", "ShortcutPath": "", "LaunchOptions": g["options"], "IsHidden": e.get("IsHidden", 0),
+               "AllowDesktopConfig": 1, "AllowOverlay": 1, "OpenVR": 0, "Devkit": 0, "DevkitGameID": "",
+               "DevkitOverrideAppID": 0, "LastPlayTime": e.get("LastPlayTime", 0), "FlatpakAppID": "",
+               "tags": {"0": g["source"]}}
+        keep.append(new)
+        if aid not in ours:
+            added.append(g["name"])
+        art.append((aid, g.get("art", {})))
+    removed = [e.get("AppName", "") for a, e in ours.items() if a not in ids]
+    table = {str(i): e for i, e in enumerate(theirs + keep)}
+    return {"shortcuts": table}, added, removed, art, ids
+
+
+GRID = {"tall": "{id}p", "wide": "{id}", "hero": "{id}_hero", "logo": "{id}_logo"}
+
+
+def fetch_art(grid, art, timeout=20):
+    """Box art into Steam's grid folder; files already there (or the person's own) are kept."""
+    os.makedirs(grid, exist_ok=True)
+    for aid, pics in art:
+        for kind, src in pics.items():
+            if not src:
+                continue
+            base = os.path.join(grid, GRID[kind].format(id=aid))
+            if glob.glob(base + ".*"):
+                continue
+            ext = os.path.splitext(src.split("?")[0])[1].lower()
+            ext = ext if ext in (".jpg", ".jpeg", ".png", ".webp") else ".jpg"
+            try:
+                if src.startswith(("http://", "https://")):
+                    req = urllib.request.Request(src, headers={"User-Agent": "KantanOS-games-sync/1.0"})
+                    with urllib.request.urlopen(req, timeout=timeout) as r:
+                        data = r.read(20_000_000)
+                    with open(base + ext, "wb") as f:
+                        f.write(data)
+                elif os.path.isfile(src):
+                    shutil.copyfile(src, base + ext)
+            except OSError:
+                pass
+
+
+def sync(force=False, quiet=False):
+    """Returns (added, removed, done): done is False when Steam was open and nothing was written."""
+    root = steam_root()
+    user = steam_user(root) if root else None
+    if not user:
+        return [], [], True                     # Steam hasn't been set up yet: nothing to do
+    path = os.path.join(user, "config", "shortcuts.vdf")
+    try:
+        with open(path, "rb") as f:
+            current = vdf_load(f.read())
+    except (OSError, ValueError, IndexError):
+        current = {}
+    state = read_json(STATE, {}) or {}
+    table, added, removed, art, ids = plan(current, wanted(), state)
+    if not added and not removed and not force:
+        fetch_art(os.path.join(user, "config", "grid"), art)
+        return [], [], True
+    if steam_running():
+        return added, removed, False
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.exists(path):
+        shutil.copyfile(path, path + ".kantanos-backup")    # one step back, just in case
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(vdf_dump(table))
+    os.replace(tmp, path)
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    with open(STATE, "w", encoding="utf-8") as f:
+        json.dump({"ids": ids, "time": time.time()}, f)
+    fetch_art(os.path.join(user, "config", "grid"), art)
+    if (added or removed) and not quiet:
+        notify(added, removed)
+    return added, removed, True
+
+
+def notify(added, removed):
+    lines = []
+    if added:
+        lines.append("Added: " + ", ".join(added[:6]) + (f" and {len(added) - 6} more" if len(added) > 6 else ""))
+    if removed:
+        lines.append("Taken out (uninstalled): " + ", ".join(removed[:6]))
+    subprocess.Popen(["notify-send", "-a", "Game Mode", "-i", "input-gaming", "Game Mode library", "\n".join(lines)],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def game_mode():
+    """The Game Mode tile: sync first; if Steam is open and something changed, restart it."""
+    added, removed, done = sync(quiet=True)
+    if not done:
+        subprocess.Popen(["notify-send", "-a", "Game Mode", "-i", "input-gaming", "Game Mode library",
+                          "Adding your new games: Steam restarts for a moment."],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["steam", "-shutdown"], capture_output=True, timeout=60)
+        for _ in range(60):
+            if not steam_running():
+                break
+            time.sleep(1)
+        sync(quiet=True)
+    os.execvp(STEAM_GAME_MODE[0], STEAM_GAME_MODE)
+
+
+# ---- self-test ----------------------------------------------------------------------------------
+def self_test():
+    global HOME, STATE, HEROIC_RUN
+    tmp = tempfile.mkdtemp()
+    # a Steam list with one shortcut the person made, and Heroic's own "Add to Steam" for Fortnite
+    theirs = {"shortcuts": {"0": {"appid": signed(shortcut_id('"/usr/bin/firefox"', "Firefox")), "AppName": "Firefox",
+                                  "Exe": '"/usr/bin/firefox"', "LaunchOptions": "", "tags": {}},
+                            "1": {"appid": -5, "AppName": "Fortnite", "Exe": "flatpak",
+                                  "LaunchOptions": 'run com.heroicgameslauncher.hgl --no-gui "heroic://launch/legendary/Fortnite"',
+                                  "LastPlayTime": 1700000000, "tags": {"0": "Mine"}}}}
+    raw = vdf_dump(theirs)
+    assert vdf_load(raw) == theirs and raw.endswith(b"\x08\x08")
+    # Heroic: Epic (Fortnite, already added by Heroic; Celeste), GOG (Witcher), Amazon (one)
+    h = os.path.join(tmp, "heroic")
+    for p, data in {"legendaryConfig/legendary/installed.json": {"Fortnite": {"title": "Fortnite"},
+                                                                   "Salt": {"title": "Celeste"}},
+                    "store_cache/legendary_library.json": {"library": [{"app_name": "Salt", "title": "Celeste",
+                                                                         "art_square": "", "art_cover": ""}]},
+                    "gog_store/installed.json": {"installed": [{"appName": "1207658930", "platform": "windows"}]},
+                    "store_cache/gog_library.json": {"games": [{"app_name": "1207658930", "title": "The Witcher 3"}]},
+                    "nile_config/nile/installed.json": [{"id": "amzn1.adg.product.x", "path": "/g"}]}.items():
+        os.makedirs(os.path.dirname(os.path.join(h, p)), exist_ok=True)
+        json.dump(data, open(os.path.join(h, p), "w"))
+    hg = heroic_games(h)
+    assert sorted(g["name"] for g in hg) == ["Celeste", "Fortnite", "The Witcher 3", "amzn1.adg.product.x"], hg
+    # Lutris: one Windows game, one Steam game (skipped)
+    db = os.path.join(tmp, "lutris", "pga.db")
+    os.makedirs(os.path.join(tmp, "lutris", "coverart"))
+    open(os.path.join(tmp, "lutris", "coverart", "ea-app.jpg"), "wb").write(b"x")
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE games (id INTEGER, name TEXT, slug TEXT, runner TEXT, installed INTEGER)")
+    con.executemany("INSERT INTO games VALUES (?,?,?,?,?)", [(3, "EA app", "ea-app", "wine", 1),
+                                                              (4, "Portal", "portal", "steam", 1),
+                                                              (5, "Old", "old", "wine", 0)])
+    con.commit()
+    con.close()
+    lg = lutris_games([db])
+    assert [(g["name"], g["options"], bool(g["art"].get("tall"))) for g in lg] == [("EA app", "lutris:rungameid/3", True)]
+    games = hg + lg
+    table, added, removed, art, ids = plan(vdf_load(raw), games, {})
+    names = [e["AppName"] for e in table["shortcuts"].values()]
+    assert names == ["Firefox", "Fortnite", "Celeste", "The Witcher 3", "amzn1.adg.product.x", "EA app"], names
+    assert sorted(added) == ["Celeste", "EA app", "The Witcher 3", "amzn1.adg.product.x"] and removed == []
+    celeste = next(e for e in table["shortcuts"].values() if e["AppName"] == "Celeste")
+    assert "heroic://launch?appName=Salt&runner=legendary" in celeste["LaunchOptions"] and celeste["tags"] == {"0": "Epic"}
+    assert (celeste["appid"] & 0xFFFFFFFF) == shortcut_id('"flatpak"', "Celeste") and celeste["appid"] < 0
+    # the round trip through Steam's format keeps everything
+    assert vdf_load(vdf_dump(table)) == table
+    # next time: Celeste uninstalled -> taken out; the person's own shortcuts untouched; play time kept
+    table["shortcuts"]["3"]["LastPlayTime"] = 1234
+    games2 = [g for g in games if g["name"] != "Celeste"]
+    t2, a2, r2, _art, ids2 = plan(table, games2, {"ids": ids})
+    assert a2 == [] and r2 == ["Celeste"], (a2, r2)
+    assert [e["AppName"] for e in t2["shortcuts"].values()] == ["Firefox", "Fortnite", "The Witcher 3",
+                                                                 "amzn1.adg.product.x", "EA app"]
+    assert next(e for e in t2["shortcuts"].values() if e["AppName"] == "The Witcher 3")["LastPlayTime"] == 1234
+    # art: local files copied into the grid folder under Steam's names
+    grid = os.path.join(tmp, "grid")
+    fetch_art(grid, [(ids[-1], {"tall": lg[0]["art"]["tall"]})])
+    assert os.path.exists(os.path.join(grid, f"{ids[-1]}p.jpg"))
+    # whole sync against a pretend Steam folder (Steam not running)
+    HOME = tmp
+    steam = os.path.join(tmp, ".local/share/Steam")
+    os.makedirs(os.path.join(steam, "userdata", "12345", "config"))
+    os.makedirs(os.path.join(steam, "config"))
+    open(os.path.join(steam, "config", "loginusers.vdf"), "w").write(
+        '"users"\n{\n\t"76561197960278073"\n\t{\n\t\t"AccountName"\t\t"x"\n\t\t"MostRecent"\t\t"1"\n\t}\n}\n')
+    assert steam_user(steam).endswith("userdata/12345"), steam_user(steam)
+    print("ok")
+
+
+def main():
+    args = sys.argv[1:]
+    if args[:1] == ["--self-test"]:
+        return self_test()
+    if args[:1] == ["--game-mode"]:
+        return game_mode()
+    if args[:1] == ["--list"]:
+        for g in wanted():
+            print(f'{g["source"]:8} {g["name"]}')
+        return
+    added, removed, done = sync(quiet="--quiet" in args)
+    if not done:
+        print("Steam is open: the new games are added the next time Game Mode is started from its tile.")
+    else:
+        print(f"Added {len(added)}, taken out {len(removed)}.")
+
+
+if __name__ == "__main__":
+    main()
