@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Install Android app
+Comment=Install this Android app (.apk); it then appears in your apps menu
+Exec=kantan-android install %F
+Icon=waydroid
+NoDisplay=true
+MimeType=application/vnd.android.package-archive;

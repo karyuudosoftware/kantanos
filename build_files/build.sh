@@ -231,6 +231,8 @@ for m in ("application/x-ms-dos-executable", "application/x-msdownload", "applic
           "application/x-ms-shortcut", "application/vnd.microsoft.portable-executable",
           "application/x-msdos-program"):
     c.set("Default Applications", m, "kantanos-windows-program.desktop")
+# Double-clicking an Android app (.apk) starts Android if needed and installs it (kantan-android).
+c.set("Default Applications", "application/vnd.android.package-archive", "kantanos-android-install.desktop")
 with open(path, "w", encoding="utf-8") as fh:
     c.write(fh, space_around_delimiters=False)
 PY

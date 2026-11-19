@@ -19,6 +19,11 @@ screens:
         description: "See phone notifications on the PC, share files and the clipboard, use the phone as a remote. Install KDE Connect on the phone from the Play Store, then pair it here."
         default: false
         script: "nohup setsid kdeconnect-app >&/dev/null"
+      - id: "android"
+        title: "Android apps"
+        description: "Run Android apps on this PC in their own windows, listed in your apps menu. Set up once (downloads about 1 GB), then double-click any .apk file to install it."
+        default: false
+        script: "nohup setsid kantan-android setup >&/dev/null"
       - id: "nas"
         title: "Connect your NAS"
         description: "Make the shared folders on your NAS (for example a TrueNAS box) work like normal folders in every app. Asks for the NAS user name and password once."

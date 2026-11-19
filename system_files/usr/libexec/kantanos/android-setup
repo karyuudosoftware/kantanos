@@ -1,0 +1,73 @@
+#!/usr/bin/bash
+# KantanOS Android apps: the root half of the setup (run through pkexec by kantan-android).
+#
+#   android-setup init VANILLA|GAPPS   download Android, pick the graphics route, apps as windows
+#   android-setup android-id            print the Android ID Google asks for (Play Store only)
+#
+# Prints "STEP: <words>" lines for the setup window.
+set -euo pipefail
+[ "$(id -u)" = 0 ] || { echo "must run as root" >&2; exit 1; }
+
+CFG=/var/lib/waydroid/waydroid.cfg
+
+set_props() {      # key=value ... into waydroid.cfg [properties] (kept across Android updates)
+    python3 - "$CFG" "$@" <<'PY'
+import configparser, sys
+path = sys.argv[1]
+c = configparser.ConfigParser(interpolation=None)
+c.optionxform = str
+c.read(path)
+if not c.has_section("properties"):
+    c.add_section("properties")
+for kv in sys.argv[2:]:
+    k, v = kv.split("=", 1)
+    c.set("properties", k, v)
+with open(path, "w") as f:
+    c.write(f)
+PY
+}
+
+render_driver() {  # the kernel driver behind each GPU render node, one per line
+    for n in /sys/class/drm/renderD*; do
+        [ -e "$n/device/driver" ] && basename "$(readlink -f "$n/device/driver")"
+    done
+}
+
+case "${1:-}" in
+init)
+    kind="${2:-VANILLA}"
+    [[ "$kind" == VANILLA || "$kind" == GAPPS ]] || { echo "unknown kind $kind" >&2; exit 2; }
+    echo "STEP: Downloading Android (about 1 GB). This takes a while."
+    systemctl enable --now waydroid-container
+    waydroid init -f -s "$kind" -c https://ota.waydro.id/system -v https://ota.waydro.id/vendor
+    restorecon -R /var/lib/waydroid || true
+
+    echo "STEP: Choosing how Android draws its windows"
+    drivers="$(render_driver | sort -u)"
+    if grep -qxE 'amdgpu|i915|xe|radeon' <<<"$drivers"; then
+        echo "graphics: $(grep -xE 'amdgpu|i915|xe|radeon' <<<"$drivers" | head -1) (direct)"
+    elif grep -qx nvidia <<<"$drivers" && command -v waydroid-nvidia-setup >/dev/null; then
+        echo "graphics: NVIDIA (through Bazzite's waydroid-nvidia)"
+        waydroid-nvidia-setup
+    else
+        echo "graphics: software (no supported graphics card found)"
+        set_props ro.hardware.gralloc=default ro.hardware.egl=swiftshader
+    fi
+
+    echo "STEP: Making Android apps open in their own windows"
+    set_props persist.waydroid.multi_windows=true persist.waydroid.udev=true persist.waydroid.uevent=true
+    waydroid upgrade -o
+    systemctl restart waydroid-container
+    echo "STEP: done"
+    ;;
+android-id)
+    # The ID Google needs to register a Play Store install (google.com/android/uncertified).
+    waydroid shell -- sh -c "sqlite3 /data/data/com.google.android.gsf/databases/gservices.db \
+        \"select value from main where name = 'android_id';\"" 2>/dev/null | tr -dc '0-9'
+    echo
+    ;;
+*)
+    echo "usage: android-setup init VANILLA|GAPPS | android-id" >&2
+    exit 2
+    ;;
+esac

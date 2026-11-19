@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=Android apps
+Name[ja]=Android アプリ
+Comment=Run Android apps in their own windows; set up the first time
+Exec=kantan-android
+Icon=waydroid
+Categories=Utility;
+Keywords=android;apk;waydroid;phone;app;play store;
+Actions=setup;
+
+[Desktop Action setup]
+Name=Set up Android apps again
+Exec=kantan-android setup

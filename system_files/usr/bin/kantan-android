@@ -1,0 +1,367 @@
+#!/usr/bin/python3
+"""KantanOS Android apps (Waydroid, from the Bazzite base).
+
+  kantan-android               open Android (its home screen), or the setup window the first time
+  kantan-android setup         the setup window
+  kantan-android install FILE  install an .apk (double-clicking one in Files does this)
+  kantan-android --self-test
+
+Android apps open in their own windows and appear in the app menu by themselves (Waydroid
+writes their menu entries; opening one starts Android if it isn't running).
+"""
+import os
+import shutil
+import subprocess
+import sys
+import threading
+import time
+
+SETUP = "/usr/libexec/kantanos/android-setup"
+UNCERTIFIED = "https://www.google.com/android/uncertified"
+APPS_DIR = os.path.expanduser("~/.local/share/applications")
+
+
+def run(*cmd, timeout=60):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        return r.returncode, r.stdout + r.stderr
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 1, str(e)
+
+
+def is_set_up():
+    """Waydroid has downloaded Android (`waydroid init` writes images_path into its config)."""
+    try:
+        with open("/var/lib/waydroid/waydroid.cfg", encoding="utf-8", errors="replace") as f:
+            return "images_path" in f.read()
+    except OSError:
+        return False
+
+
+def downloaded_mb(root="/var/lib/waydroid"):
+    """Megabytes under Waydroid's folder so far (0 if it can't be read)."""
+    total = 0
+    for d, _dirs, files in os.walk(root):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(d, name)).st_size
+            except OSError:
+                pass
+    return total // (1 << 20)
+
+
+def status():
+    """{'Session': 'RUNNING', 'Container': 'RUNNING', ...} from `waydroid status`."""
+    _code, out = run("waydroid", "status", timeout=20)
+    return dict((k.strip(), v.strip()) for k, v in (line.split(":", 1) for line in out.splitlines() if ":" in line))
+
+
+def parse_apps(text):
+    """`waydroid app list` -> {package: name}."""
+    apps, name = {}, None
+    for line in text.splitlines():
+        if line.startswith("Name:"):
+            name = line.split(":", 1)[1].strip()
+        elif line.startswith("packageName:"):
+            apps[line.split(":", 1)[1].strip()] = name or ""
+    return apps
+
+
+def app_list():
+    code, out = run("waydroid", "app", "list", timeout=30)
+    return parse_apps(out) if code == 0 else None
+
+
+def ensure_running(wait=180, say=lambda text: None):
+    """Starts Android in the background if it isn't running and waits until apps can be installed."""
+    if status().get("Session") != "RUNNING":
+        say("Starting Android…")
+        subprocess.run(["systemd-run", "--user", "--collect", "--quiet", "--unit=kantanos-android-session",
+                        "waydroid", "session", "start"], capture_output=True)
+    end = time.time() + wait
+    while time.time() < end:
+        if status().get("Session") == "RUNNING" and app_list():
+            return True
+        time.sleep(3)
+    return False
+
+
+def apk_icon(apk, dest):
+    """Copies the app's launcher picture out of the .apk (the biggest ic_launcher PNG). True if found."""
+    import zipfile
+    try:
+        with zipfile.ZipFile(apk) as z:
+            pngs = [i for i in z.infolist() if i.filename.lower().endswith(".png")
+                    and re_launcher(i.filename)]
+            if not pngs:
+                return False
+            best = max(pngs, key=lambda i: i.file_size)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "wb") as f:
+                f.write(z.read(best))
+            return True
+    except (OSError, zipfile.BadZipFile, KeyError):
+        return False
+
+
+def re_launcher(name):
+    low = name.lower()
+    return low.startswith("res/") and ("mipmap" in low or "drawable" in low) and \
+        any(k in os.path.basename(low) for k in ("ic_launcher", "launcher", "app_icon", "icon"))
+
+
+def write_menu_entry(pkg, label, apk=None):
+    """The app's entry in the apps menu, in Waydroid's own format (Waydroid keeps it up to date from
+    the next Android start; until then this makes a newly installed app appear straight away)."""
+    path = os.path.join(APPS_DIR, f"waydroid.{pkg}.desktop")
+    if os.path.exists(path):
+        return path
+    icon = os.path.expanduser(f"~/.local/share/waydroid/data/icons/{pkg}.png")
+    if not os.path.exists(icon):
+        own = os.path.expanduser(f"~/.local/share/kantanos/android-icons/{pkg}.png")
+        icon = own if apk and apk_icon(apk, own) else "waydroid"
+    os.makedirs(APPS_DIR, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("[Desktop Entry]\nType=Application\n"
+                f"Name={label or pkg}\nExec=waydroid app launch {pkg}\nIcon={icon}\n"
+                "Categories=X-WayDroid-App;\nX-Purism-FormFactor=Workstation;Mobile;\nActions=app-settings;\n\n"
+                "[Desktop Action app-settings]\nName=App Settings\n"
+                f"Exec=waydroid app intent android.settings.APPLICATION_DETAILS_SETTINGS package:{pkg}\n")
+    subprocess.run(["kbuildsycoca6"], capture_output=True)       # the menu notices it now
+    return path
+
+
+def notify(text, title="Android apps", actions=()):
+    args = ["notify-send", "--app-name=Android apps", "--icon=waydroid", title, text]
+    for key, label in actions:
+        args.insert(1, f"--action={key}={label}")
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=300 if actions else 10)
+        return r.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def install(paths):
+    if not is_set_up():
+        notify("Android apps aren't set up yet. The setup window is opening.")
+        return setup_window(then_install=paths)
+    if not ensure_running(say=notify):
+        notify("Android didn't start. Try again in a minute, or restart the PC.")
+        return 1
+    worked = 0
+    for path in paths:
+        before = app_list() or {}
+        name = os.path.basename(path)
+        code, out = run("waydroid", "app", "install", os.path.abspath(path), timeout=300)
+        new = {}
+        end = time.time() + 60
+        while time.time() < end and not new:
+            new = {p: n for p, n in (app_list() or {}).items() if p not in before}
+            if not new:
+                time.sleep(2)
+        if new:
+            pkg, label = next(iter(new.items()))
+            worked += 1
+            write_menu_entry(pkg, label, path)
+            if notify(f"{label or pkg} is installed. It's in your apps menu.", f"Installed: {label or pkg}",
+                      [("open", "Open")]) == "open":
+                subprocess.Popen(["waydroid", "app", "launch", pkg], start_new_session=True)
+        elif code == 0:
+            worked += 1
+            notify(f"{name} was installed (or updated). It's in your apps menu.")
+        else:
+            notify(f"{name} couldn't be installed. It may be for a different kind of phone "
+                   f"(ARM only), or damaged.\n{out.strip()[-200:]}")
+    return 0 if worked == len(paths) else 1
+
+
+def open_android():
+    if not is_set_up():
+        return setup_window()
+    os.execvp("waydroid", ["waydroid", "show-full-ui"])
+
+
+# ---- the setup window -------------------------------------------------------------------------
+def setup_window(then_install=()):
+    from PySide6.QtCore import QObject, Qt, Signal
+    from PySide6.QtGui import QFont, QIcon
+    from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QPushButton, QRadioButton, QVBoxLayout,
+                                   QWidget)
+
+    class Bridge(QObject):
+        step = Signal(str)
+        done = Signal(bool, str)
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setDesktopFileName("kantanos-android")
+    w = QWidget()
+    w.setWindowTitle("Android apps")
+    w.setWindowIcon(QIcon.fromTheme("waydroid", QIcon.fromTheme("smartphone")))
+    f = w.font()
+    f.setPointSizeF(f.pointSizeF() * 1.3)
+    w.setFont(f)
+    lay = QVBoxLayout(w)
+    lay.setContentsMargins(48, 36, 48, 30)
+    lay.setSpacing(14)
+    head = QLabel("Android apps")
+    hf = QFont(w.font())
+    hf.setPointSizeF(hf.pointSizeF() * 1.6)
+    hf.setBold(True)
+    head.setFont(hf)
+    lay.addWidget(head)
+    intro = QLabel("Run Android apps on this PC, each in its own window, listed in your apps menu like any "
+                   "other app. To add one, double-click its .apk file in Files.<br><br>"
+                   "Setting up downloads Android once (about 1 GB).")
+    intro.setWordWrap(True)
+    intro.setTextFormat(Qt.TextFormat.RichText)
+    lay.addWidget(intro)
+    vanilla = QRadioButton("Without Google (private; add apps from .apk files or F-Droid)")
+    gapps = QRadioButton("With the Google Play Store (you sign in with your own Google account, plus one "
+                         "registration step with Google)")
+    vanilla.setChecked(True)
+    for b in (vanilla, gapps):
+        b.setStyleSheet("QRadioButton { spacing: 12px; }")
+        lay.addWidget(b)
+    status_l = QLabel("")
+    status_l.setWordWrap(True)
+    status_l.setTextFormat(Qt.TextFormat.RichText)
+    status_l.setOpenExternalLinks(True)
+    status_l.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+    lay.addWidget(status_l)
+    lay.addStretch(1)
+    row = QHBoxLayout()
+    close = QPushButton(QIcon.fromTheme("window-close"), "Close")
+    close.clicked.connect(w.close)
+    go = QPushButton(QIcon.fromTheme("dialog-ok"), "Set up")
+    go.setDefault(True)
+    row.addStretch(1)
+    row.addWidget(close)
+    row.addWidget(go)
+    lay.addLayout(row)
+    bridge = Bridge(w)
+    bridge.step.connect(lambda t: status_l.setText(f"<b>{t}</b>"))
+    w.chosen = None
+
+    def work(kind):
+        p = subprocess.Popen(["pkexec", SETUP, "init", kind], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, stdin=subprocess.DEVNULL)
+        tail = []
+        phase = {"downloading": False}
+
+        def progress():                         # how much has arrived, while the download runs
+            while p.poll() is None:
+                if phase["downloading"]:
+                    mb = downloaded_mb()
+                    if mb:
+                        bridge.step.emit(f"Downloading Android: {mb} MB of about 1,000 MB. This takes a while.")
+                time.sleep(5)
+        threading.Thread(target=progress, daemon=True).start()
+        for line in p.stdout:
+            line = line.strip()
+            tail = (tail + [line])[-6:]
+            if line.startswith("STEP: ") and line != "STEP: done":
+                phase["downloading"] = line.startswith("STEP: Downloading")
+                bridge.step.emit(line[6:])
+        ok = p.wait() == 0
+        if ok:
+            bridge.step.emit("Starting Android for the first time…")
+            ok = ensure_running(wait=300)
+        bridge.done.emit(ok, "\n".join(tail))
+
+    def done(ok, tail):
+        go.setEnabled(True)
+        if not ok:
+            status_l.setText("<b>That didn't work.</b> Check the internet connection and press Set up to try "
+                             f"again.<br><small>{tail.replace(chr(10), '<br>')}</small>")
+            go.setText("Set up")
+            return
+        msg = ("<b>Android apps are ready.</b> Double-click an .apk file in Files to install an app; it then "
+               "appears in your apps menu.")
+        if w.chosen == "GAPPS":
+            code, out = run("pkexec", SETUP, "android-id", timeout=60)
+            aid = out.strip() if code == 0 and out.strip().isdigit() else ""
+            msg += ("<br><br><b>One more step for the Play Store:</b> Google has to accept this PC first. "
+                    f"Open <a href='{UNCERTIFIED}'>{UNCERTIFIED}</a>, sign in, and enter "
+                    + (f"this number: <tt>{aid}</tt>" if aid else
+                       "the number shown by the Device ID app (open the Play Store once first)")
+                    + ". After a few minutes, sign in to the Play Store in Android.")
+        status_l.setText(msg)
+        go.setText("Open Android")
+        go.clicked.disconnect()
+        go.clicked.connect(lambda: (w.close(), subprocess.Popen(["waydroid", "show-full-ui"], start_new_session=True)))
+        if then_install:
+            threading.Thread(target=install, args=(list(then_install),), daemon=True).start()
+
+    bridge.done.connect(done)
+
+    def start():
+        w.chosen = "GAPPS" if gapps.isChecked() else "VANILLA"
+        go.setEnabled(False)
+        go.setText("Working…")
+        status_l.setText("<b>Starting…</b>")
+        threading.Thread(target=work, args=(w.chosen,), daemon=True).start()
+
+    go.clicked.connect(start)
+    if is_set_up():
+        status_l.setText("Android apps are already set up. Setting up again starts Android afresh "
+                         "(apps you installed are removed).")
+    w.resize(1100, 620)
+    w.show()
+    w.status_label = status_l
+    if "--self-test" in sys.argv:
+        return app, w
+    return app.exec()
+
+
+def self_test():
+    sample = ("Name: Settings\npackageName: com.android.settings\ncategories:\n\tandroid.intent.category.LAUNCHER\n"
+              "Name: F-Droid\npackageName: org.fdroid.fdroid\n")
+    assert parse_apps(sample) == {"com.android.settings": "Settings", "org.fdroid.fdroid": "F-Droid"}
+    assert parse_apps("") == {}
+    assert downloaded_mb("/nonexistent") == 0
+    import tempfile
+    import zipfile
+    global APPS_DIR
+    tmp = tempfile.mkdtemp()
+    apk = os.path.join(tmp, "t.apk")
+    with zipfile.ZipFile(apk, "w") as z:
+        z.writestr("res/mipmap-mdpi/ic_launcher.png", b"small")
+        z.writestr("res/mipmap-xxxhdpi/ic_launcher.png", b"the biggest one")
+        z.writestr("res/drawable/background.png", b"not an icon at all, longer")
+    assert apk_icon(apk, os.path.join(tmp, "i.png"))
+    assert open(os.path.join(tmp, "i.png"), "rb").read() == b"the biggest one"
+    APPS_DIR = os.path.join(tmp, "apps")
+    entry = open(write_menu_entry("org.example.app", "Example", apk), encoding="utf-8").read()
+    assert "Exec=waydroid app launch org.example.app" in entry and "Name=Example" in entry
+    assert "NoDisplay" not in entry
+    shutil.rmtree(tmp, ignore_errors=True)
+    assert os.access(SETUP, os.X_OK) or not os.path.exists("/usr/libexec/kantanos"), SETUP
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    _app, w = setup_window()
+    assert w.windowTitle() == "Android apps"
+    w.close()
+    print("kantan-android self-test ok")
+
+
+def main():
+    args = sys.argv[1:]
+    if "--self-test" in args:
+        self_test()
+        return 0
+    if args and args[0] == "setup":
+        return setup_window()
+    if args and args[0] == "install":
+        files = [a for a in args[1:] if a.lower().endswith((".apk", ".xapk")) or os.path.isfile(a)]
+        if not files:
+            print("usage: kantan-android install FILE.apk", file=sys.stderr)
+            return 2
+        return install(files)
+    if shutil.which("waydroid") is None:
+        print("Waydroid isn't on this system.", file=sys.stderr)
+        return 1
+    return open_android()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

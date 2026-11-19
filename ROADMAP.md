@@ -83,7 +83,8 @@ the Windows VM install, cloud backups) whenever the owner is at the PC.
       the Mac with a real ROM, C64 and MSX.
 - [x] **Anti-cheat games:** "Windows" tile on the start screen (only on PCs with Windows), app
       menu entry and Welcome → Games: Windows starts once (firmware BootNext), no password.
-- [ ] **Remote:** air-mouse remote support, including its voice button.
+- [ ] **Remote:** air-mouse remote support, including its voice button. Parked until the
+      G20S remote has been bought: its buttons have to be read on the real PC.
 
 ## Windows and Android apps
 
@@ -113,7 +114,12 @@ on the real PC.*
       (`~/.wine`), Windows 11 mode, Japanese fonts. Welcome → Windows tab.
 - [~] Windows programs Wine cannot run: the Windows VM above (built; first real install to do).
 - [x] `C:\` in the Files sidebar ("C: (Windows)").
-- [ ] Android apps through Waydroid.
+- [x] Android apps through Waydroid: "Android apps" (`kantan-android`, also in Welcome) sets
+      it up in one window, with or without the Play Store, choosing the graphics route
+      (direct on AMD/Intel, Bazzite's waydroid-nvidia on NVIDIA, software otherwise) and
+      apps-as-windows. Double-clicking an .apk starts Android if needed, installs it and puts
+      it in the apps menu. VM-tested with F-Droid. Not tried yet: the RTX 4080 route, the
+      Play Store registration step.
 - [x] Notepad++ through Wine (one click in Welcome → Windows). Known Wine bug: its menu bar
       wraps into a column (Wine's own apps are fine); recheck on Wine updates. ArtCraft still to try.
 
