@@ -1,0 +1,8 @@
+[Mode]
+Name=Vintage Computers
+Name[ja]=レトロパソコン
+Comment=DOS, Windows 95/98, Amiga, Atari ST, C64, Mac and more
+Comment[ja]=DOS、Windows 95/98、Amiga、Atari ST、C64、Mac など
+Icon=vintage
+Exec=/usr/libexec/kantanos/vintage
+Order=45

@@ -73,8 +73,14 @@ the Windows VM install, cloud backups) whenever the owner is at the PC.
       up once: pinned release checked by SHA-256, game folders in `~/Emulation/roms/<console>`,
       emulators allowed to read USB drives and the NAS; Boxshelf updates itself after that.
       Still to do: the emulator library on the NAS (NFS rather than iSCSI), controller test.
-- [ ] **Vintage Computers:** DOS, Windows 3.x–98, classic Mac OS, Amiga, C64, Atari ST and
+- [~] **Vintage Computers:** DOS, Windows 3.x–98, classic Mac OS, Amiga, C64, Atari ST and
       more through existing emulators. Own ROMs/install media only; nothing copyrighted ships.
+      Start-screen tile and app (`/usr/libexec/kantanos/vintage`): DOS PC and Windows 95/98 PC
+      (DOSBox-X, Windows installed from the family's own CD image), Amiga (Amiberry with AROS),
+      Atari ST (Hatari with EmuTOS), C64 (VICE), classic Mac (Basilisk II, own ROM), MSX
+      (openMSX with C-BIOS), ZX Spectrum (Fuse); a folder per computer in `~/Vintage`.
+      VM-tested: DOS, Amiga, Atari ST, Spectrum. Still to try: a real Windows 95/98 install,
+      the Mac with a real ROM, C64 and MSX.
 - [x] **Anti-cheat games:** "Windows" tile on the start screen (only on PCs with Windows), app
       menu entry and Welcome → Games: Windows starts once (firmware BootNext), no password.
 - [ ] **Remote:** air-mouse remote support, including its voice button.

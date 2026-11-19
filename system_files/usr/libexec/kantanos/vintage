@@ -1,0 +1,506 @@
+#!/usr/bin/python3
+"""KantanOS Vintage Computers: old home computers and PCs through existing emulators from Flathub.
+
+Each computer gets a folder in ~/Vintage/<name> for its disks and the family's own system files.
+KantanOS never downloads ROMs, system disks or games. Where a free replacement for the system
+software exists the emulator brings it (AROS for the Amiga, EmuTOS for the Atari ST, C-BIOS for
+the MSX), so those start without anything extra.
+
+  vintage              the computer shelf
+  vintage --start ID   start one computer straight away (dos, win9x, amiga, atarist, c64, mac,
+                       msx, spectrum)
+  vintage --self-test
+"""
+import glob
+import os
+import queue
+import shutil
+import subprocess
+import sys
+import tempfile
+import threading
+
+HOME = os.path.expanduser("~")
+VINTAGE = os.path.join(HOME, "Vintage")
+# Places an emulator may read disks from: home, USB drives and the NAS
+PLACES = ["home", "/run/media", "/media", "/mnt", "xdg-run/gvfs"]
+
+MACHINES = [
+    {"id": "dos", "name": "DOS PC", "years": "1981-1995", "app": "com.dosbox_x.DOSBox-X", "emu": "DOSBox-X",
+     "folder": "DOS",
+     "about": "Games and programs for MS-DOS. The \"C drive\" folder is the PC's hard disk. Windows 3.1 "
+              "works here too: copy its setup files into the C drive folder and type SETUP.",
+     "readme": ["Put DOS games and programs in the \"C drive\" folder: that folder is drive C: inside the PC.",
+                "Start the PC, type the folder name (for example: cd KEEN) and the program name.",
+                "Windows 3.1: copy its install disks or CD into a folder in \"C drive\", run SETUP, then WIN.",
+                "Settings (screen, speed) are in dosbox-x.conf here."]},
+    {"id": "win9x", "name": "Windows 95 / 98 PC", "years": "1995-2000", "app": "com.dosbox_x.DOSBox-X",
+     "emu": "DOSBox-X", "folder": "Windows 9x",
+     "about": "A late-90s PC for Windows 95 and 98 games. Install Windows once from your own disc "
+              "(an .iso file of your CD), then it starts like a real PC.",
+     "needs": "your own Windows 95 or 98 CD (as an .iso file)",
+     "readme": ["hdd.img is the PC's hard disk (made when you install Windows).",
+                "Put CD images (.iso) of games here; Install from a disc can also install games.",
+                "Settings are in dosbox-x.conf here."]},
+    {"id": "amiga", "name": "Amiga", "years": "1985-1996", "app": "com.blitterstudio.amiberry", "emu": "Amiberry",
+     "folder": "Amiga",
+     "about": "Commodore's Amiga. Starts with AROS, a free replacement for the Amiga's built-in system; "
+              "for the best compatibility add your own Kickstart ROM file (from your Amiga or Amiga Forever).",
+     "readme": ["Put disk images (.adf, .hdf, .lha) here.",
+                "Your own Kickstart ROM files (.rom) go in the \"Kickstarts\" folder; in Amiberry, Paths,",
+                "point the system ROMs folder there and press Rescan."]},
+    {"id": "atarist", "name": "Atari ST", "years": "1985-1993", "app": "org.tuxfamily.hatari", "emu": "Hatari",
+     "folder": "Atari ST",
+     "about": "Atari's ST. Starts with EmuTOS, a free replacement for the ST's built-in system; add your own "
+              "TOS file (tos.img) here for the real one.",
+     "readme": ["Put disk images (.st, .msa, .stx) here. The first one (by name) goes in drive A when it starts;",
+                "change disks with F12.",
+                "Your own TOS: name it tos.img and put it here."]},
+    {"id": "c64", "name": "Commodore 64", "years": "1982-1994", "app": "net.sf.VICE", "emu": "VICE",
+     "folder": "C64",
+     "about": "The Commodore 64. Open a game with File, Smart attach, or drop a file on the window.",
+     "readme": ["Put disk and tape images (.d64, .t64, .tap, .prg, .crt) here.",
+                "In VICE: File, Smart attach, choose the game, and it starts by itself."]},
+    {"id": "mac", "name": "Classic Mac", "years": "1984-1998", "app": "net.cebix.basilisk", "emu": "Basilisk II",
+     "folder": "Mac",
+     "about": "A 68k Macintosh for System 7 to Mac OS 8.1. Needs a ROM file from your own Mac and a "
+              "System disk image.",
+     "needs": "a ROM file from your own Mac (name it MAC.ROM) and a System disk image",
+     "readme": ["Put your Mac's ROM file here, named MAC.ROM.",
+                "Put disk images (.dsk, .img, .hfv) here: every one of them is attached when the Mac starts.",
+                "The \"Shared\" folder appears on the Mac's desktop as a disk called Unix."]},
+    {"id": "msx", "name": "MSX", "years": "1983-1995", "app": "org.openmsx.openMSX", "emu": "openMSX",
+     "folder": "MSX",
+     "about": "The MSX home computers, big in Japan and Europe. Starts with C-BIOS, a free system "
+              "that runs cartridge games; add your own system ROMs for disk software.",
+     "readme": ["Put cartridge (.rom) and disk (.dsk) images here.",
+                "In openMSX press F10 for its menu, or drop a file on the window."]},
+    {"id": "spectrum", "name": "ZX Spectrum", "years": "1982-1992", "app": "net.sourceforge.fuse_emulator.Fuse", "emu": "Fuse",
+     "folder": "ZX Spectrum",
+     "about": "Sinclair's ZX Spectrum. Its system ROMs come with the emulator (Amstrad allows that).",
+     "readme": ["Put tape and snapshot files (.tzx, .tap, .z80, .sna) here.",
+                "In Fuse: File, Open, choose the game."]},
+]
+BY_ID = {m["id"]: m for m in MACHINES}
+
+
+def folder(m):
+    return os.path.join(VINTAGE, m["folder"])
+
+
+def make_folder(m):
+    d = folder(m)
+    os.makedirs(d, exist_ok=True)
+    extra = {"dos": ["C drive"], "amiga": ["Kickstarts"], "mac": ["Shared"]}.get(m["id"], [])
+    for sub in extra:
+        os.makedirs(os.path.join(d, sub), exist_ok=True)
+    readme = os.path.join(d, "README.txt")
+    if not os.path.exists(readme):
+        lines = [f"{m['name']} ({m['emu']})", ""] + m["readme"] + [
+            "", "KantanOS never downloads ROMs, system disks or games: use your own."]
+        with open(readme, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    return d
+
+
+def installed(app_id):
+    try:
+        return subprocess.run(["flatpak", "info", app_id], capture_output=True, timeout=30).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def allow_places(app_id):
+    subprocess.run(["flatpak", "override", "--user"] + [f"--filesystem={p}" for p in PLACES] + [app_id],
+                   capture_output=True, timeout=30)
+
+
+# ---- DOSBox-X ---------------------------------------------------------------------------------
+def dosbox_conf(path, sections):
+    """Writes a DOSBox-X config once; the family may edit it afterwards, so it's never overwritten.
+    The [autoexec] section is replaced every time, since it's how KantanOS says what to start."""
+    keep = ""
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            keep = f.read().split("[autoexec]")[0].rstrip() + "\n"
+    if not keep:
+        out = []
+        for name, values in sections.items():
+            if name == "autoexec":
+                continue
+            out.append(f"[{name}]")
+            out += [f"{k}={v}" for k, v in values.items()]
+            out.append("")
+        keep = "\n".join(out)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(keep + "\n[autoexec]\n@echo off\n" + "\n".join(sections.get("autoexec", [])) + "\n")
+    return path
+
+
+def dos_q(path):
+    return '"' + path + '"'
+
+
+def dos_command(m):
+    d = make_folder(m)
+    conf = dosbox_conf(os.path.join(d, "dosbox-x.conf"), {
+        "sdl": {"fullscreen": "true", "output": "opengl"},
+        "dosbox": {"machine": "svga_s3", "memsize": "16", "title": "DOS PC"},
+        "cpu": {"core": "auto", "cycles": "auto"},
+        "autoexec": [f"mount c {dos_q(os.path.join(d, 'C drive'))}", "c:", "cls",
+                     "echo Your DOS PC. Type DIR to see what's in the C drive folder."]})
+    return ["flatpak", "run", m["app"], "-conf", conf]
+
+
+WIN9X_SETTINGS = {
+    "sdl": {"fullscreen": "true", "output": "opengl", "autolock": "true"},
+    "dosbox": {"machine": "svga_s3", "memsize": "128", "title": "Windows 95 / 98 PC"},
+    "cpu": {"core": "normal", "cputype": "pentium_mmx", "cycles": "max"},
+    "pci": {"voodoo": "false"},
+    "sblaster": {"sbtype": "sb16vibra"},
+    "ide, primary": {"int13fakeio": "true", "int13fakev86io": "true"},
+}
+
+
+def win9x_disk(m):
+    return os.path.join(folder(m), "hdd.img")
+
+
+def win9x_install_command(m, iso):
+    """First start: an empty 2 GB disk, the Windows disc as D:, and Windows setup from the CD.
+    Setup restarts the PC several times; after its first restart the PC starts from the disk."""
+    d = make_folder(m)
+    disk = win9x_disk(m)
+    auto = []
+    if not os.path.exists(disk):
+        auto.append(f"imgmake {dos_q(disk)} -t hd_2gig")
+    auto += [f"imgmount c {dos_q(disk)} -ide 1m", f"imgmount d {dos_q(iso)} -ide 2m", "d:",
+             r"if exist d:\win98\setup.exe d:\win98\setup.exe /is /ie",
+             r"if exist d:\win95\setup.exe d:\win95\setup.exe /is /ie",
+             r"if exist d:\setup.exe d:\setup.exe /is /ie"]
+    conf = dosbox_conf(os.path.join(d, "install.conf"), dict(WIN9X_SETTINGS, autoexec=auto))
+    return ["flatpak", "run", m["app"], "-conf", conf]
+
+
+def win9x_command(m, iso=None):
+    d = make_folder(m)
+    auto = [f"imgmount c {dos_q(win9x_disk(m))} -ide 1m"]
+    if iso:
+        auto.append(f"imgmount d {dos_q(iso)} -ide 2m")
+    auto.append("boot c:")
+    conf = dosbox_conf(os.path.join(d, "dosbox-x.conf"), dict(WIN9X_SETTINGS, autoexec=auto))
+    return ["flatpak", "run", m["app"], "-conf", conf]
+
+
+# ---- the others -------------------------------------------------------------------------------
+def disks(d, exts):
+    found = []
+    for e in exts:
+        found += glob.glob(os.path.join(d, "*." + e)) + glob.glob(os.path.join(d, "*." + e.upper()))
+    return sorted(set(found), key=str.lower)
+
+
+def mac_rom(m):
+    for name in ("MAC.ROM", "mac.rom", "Mac.rom"):
+        p = os.path.join(folder(m), name)
+        if os.path.isfile(p):
+            return p
+    roms = disks(folder(m), ["rom"])
+    return roms[0] if roms else None
+
+
+def mac_prefs(m):
+    """Basilisk II's settings: its ROM, every disk image in the folder and the shared folder."""
+    d = make_folder(m)
+    lines = [f"rom {mac_rom(m)}"] + [f"disk {p}" for p in disks(d, ["dsk", "img", "hfv", "hda"])] + [
+        f"extfs {os.path.join(d, 'Shared')}", "ramsize 134217728", "modelid 14", "cpu 4", "fpu true",
+        "screen win/1024/768", "frameskip 0", "nocdrom true", "nosound false", "jit false"]
+    path = os.path.join(HOME, ".basilisk_ii_prefs")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return path
+
+
+def missing(m):
+    """What the family still has to add before this computer can start, or None."""
+    if m["id"] == "mac" and not mac_rom(m):
+        return f"Needs a ROM file from your own Mac: put it in {folder(m)} as MAC.ROM."
+    if m["id"] == "win9x" and not os.path.exists(win9x_disk(m)):
+        return "Windows isn't installed yet: choose Install from your disc."
+    return None
+
+
+def command(m):
+    d = make_folder(m)
+    app = m["app"]
+    if m["id"] == "dos":
+        return dos_command(m)
+    if m["id"] == "win9x":
+        return win9x_command(m)
+    if m["id"] == "atarist":
+        args = ["flatpak", "run", app, "--fullscreen"]
+        tos = os.path.join(d, "tos.img")
+        if os.path.isfile(tos):
+            args += ["--tos", tos]
+        floppies = disks(d, ["st", "msa", "stx"])
+        return args + floppies[:1]
+    if m["id"] == "mac":
+        mac_prefs(m)
+        return ["flatpak", "run", app]
+    if m["id"] == "c64":
+        return ["flatpak", "run", app, "-fullscreen"]
+    if m["id"] == "spectrum":
+        return ["flatpak", "run", app, "--full-screen"]
+    return ["flatpak", "run", app]
+
+
+def launch(m):
+    cmd = command(m)
+    subprocess.Popen(cmd, cwd=folder(m), start_new_session=True, stdin=subprocess.DEVNULL)
+    return cmd
+
+
+# ---- the window -------------------------------------------------------------------------------
+def window():
+    from PySide6.QtCore import QObject, Qt, Signal
+    from PySide6.QtGui import QFont, QIcon
+    from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
+                                   QPushButton, QScrollArea, QVBoxLayout, QWidget)
+
+    class Bridge(QObject):
+        done = Signal(str, bool)                    # machine id, worked
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setDesktopFileName("kantanos-vintage")
+    w = QWidget()
+    w.setWindowTitle("Vintage Computers")
+    w.setWindowIcon(QIcon.fromTheme("computer-laptop"))
+    w.setStyleSheet("QWidget#page { background: #0e1420; } QLabel { color: #e8eef8; } "
+                    "QFrame#card { background: #182234; border-radius: 16px; } "
+                    "QFrame#card:focus-within { border: 3px solid #4a8be0; } "
+                    "QPushButton { padding: 10px 18px; border-radius: 10px; background: #26344c; color: white; "
+                    "border: 1px solid #34465f; } QPushButton:focus, QPushButton:hover { background: #3a78c8; }")
+    w.setObjectName("page")
+    f = w.font()
+    f.setPointSizeF(f.pointSizeF() * 1.25)
+    w.setFont(f)
+    outer = QVBoxLayout(w)
+    outer.setContentsMargins(48, 36, 48, 28)
+    head = QLabel("Vintage Computers")
+    hf = QFont(w.font())
+    hf.setPointSizeF(hf.pointSizeF() * 1.8)
+    hf.setBold(True)
+    head.setFont(hf)
+    outer.addWidget(head)
+    sub = QLabel("Old computers, ready to start. Each one has a folder in Vintage (in your home folder) for its "
+                 "disks. Use your own game disks, ROMs and system disks: KantanOS never downloads them.")
+    sub.setWordWrap(True)
+    sub.setStyleSheet("color: #aab8cc;")
+    outer.addWidget(sub)
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    scroll.setStyleSheet("QScrollArea { background: transparent; } QScrollArea > QWidget > QWidget { background: transparent; }")
+    inner = QWidget()
+    grid = QGridLayout(inner)
+    grid.setSpacing(18)
+    scroll.setWidget(inner)
+    outer.addWidget(scroll, 1)
+    status = QLabel("")
+    status.setWordWrap(True)
+    outer.addWidget(status)
+    bridge = Bridge(w)
+    cards = {}
+    busy = set()
+
+    def refresh(mid):
+        m, c = BY_ID[mid], cards[mid]
+        if mid in busy:
+            c["state"].setText(f"Installing {m['emu']}…")
+            c["go"].setEnabled(False)
+            return
+        c["go"].setEnabled(True)
+        if not installed(m["app"]):
+            c["state"].setText(f"Not installed yet ({m['emu']}). Select Install.")
+            c["go"].setText("Install")
+        else:
+            gap = missing(m)
+            c["state"].setText(gap or "Ready")
+            c["go"].setText("Start")
+        if c.get("disc"):
+            c["disc"].setVisible(installed(m["app"]))
+
+    jobs = queue.Queue()                            # one install at a time, in the order they were chosen
+
+    def worker():
+        while True:
+            mid = jobs.get()
+            app_id = BY_ID[mid]["app"]
+            ok = installed(app_id)
+            if not ok:
+                r = subprocess.run(["kantan-app", "install", app_id], stdin=subprocess.DEVNULL, capture_output=True)
+                ok = r.returncode == 0 and installed(app_id)
+            if ok:
+                allow_places(app_id)
+            bridge.done.emit(mid, ok)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+    def install(mid):
+        if mid in busy:
+            return
+        busy.add(mid)
+        refresh(mid)
+        if len(busy) > 1:
+            cards[mid]["state"].setText(f"Waiting to install {BY_ID[mid]['emu']} (one at a time)…")
+        jobs.put(mid)
+
+    def installed_now(mid, ok):
+        busy.discard(mid)
+        for other in cards:                         # two computers can share an emulator (DOSBox-X)
+            if other not in busy:
+                refresh(other)
+        status.setText(f"{BY_ID[mid]['emu']} is installed." if ok else
+                       f"{BY_ID[mid]['emu']} couldn't be installed. Is the internet connected?")
+
+    bridge.done.connect(installed_now)
+
+    def go(mid):
+        m = BY_ID[mid]
+        if not installed(m["app"]):
+            install(mid)
+            return
+        gap = missing(m)
+        if gap:
+            status.setText(gap)
+            if mid == "win9x":
+                from_disc(mid)
+            return
+        launch(m)
+        status.setText(f"Starting the {m['name']}…")
+
+    def from_disc(mid):
+        m = BY_ID[mid]
+        iso, _ = QFileDialog.getOpenFileName(w, "Choose your Windows 95 or 98 disc (.iso)", HOME,
+                                             "Disc images (*.iso *.ISO)")
+        if not iso:
+            return
+        if os.path.exists(win9x_disk(m)):
+            cmd = win9x_command(m, iso)         # Windows is there: the disc goes in drive D
+            status.setText("Starting the PC with your disc in drive D.")
+        else:
+            cmd = win9x_install_command(m, iso)
+            status.setText("Windows setup is starting. When it restarts the PC the first time, close the "
+                           "window and press Start: the PC then starts from its own disk and setup carries on.")
+        subprocess.Popen(cmd, cwd=folder(m), start_new_session=True, stdin=subprocess.DEVNULL)
+
+    def open_folder(mid):
+        subprocess.Popen(["xdg-open", make_folder(BY_ID[mid])], start_new_session=True)
+
+    for i, m in enumerate(MACHINES):
+        card = QFrame()
+        card.setObjectName("card")
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(22, 18, 22, 18)
+        title = QLabel(f"<b>{m['name']}</b>  <span style='color:#8ea2bf'>{m['years']}</span>")
+        tf = QFont(w.font())
+        tf.setPointSizeF(tf.pointSizeF() * 1.25)
+        title.setFont(tf)
+        about = QLabel(m["about"])
+        about.setWordWrap(True)
+        about.setStyleSheet("color: #c4d0e2;")
+        state = QLabel("")
+        state.setWordWrap(True)
+        state.setStyleSheet("color: #7fd0a0;")
+        row = QHBoxLayout()
+        gobtn = QPushButton("Start")
+        gobtn.clicked.connect(lambda _c=False, mid=m["id"]: go(mid))
+        fbtn = QPushButton("Folder")
+        fbtn.clicked.connect(lambda _c=False, mid=m["id"]: open_folder(mid))
+        row.addWidget(gobtn)
+        row.addWidget(fbtn)
+        entry = {"state": state, "go": gobtn}
+        if m["id"] == "win9x":
+            disc = QPushButton("Install from your disc…")
+            disc.clicked.connect(lambda _c=False, mid=m["id"]: from_disc(mid))
+            row.addWidget(disc)
+            entry["disc"] = disc
+        row.addStretch(1)
+        lay.addWidget(title)
+        lay.addWidget(about, 1)
+        lay.addWidget(state)
+        lay.addLayout(row)
+        grid.addWidget(card, i // 2, i % 2)
+        cards[m["id"]] = entry
+        refresh(m["id"])
+    row = QHBoxLayout()
+    row.addStretch(1)
+    close = QPushButton(QIcon.fromTheme("window-close"), "Close")
+    close.clicked.connect(w.close)
+    row.addWidget(close)
+    outer.addLayout(row)
+    cards["dos"]["go"].setFocus()
+    w.resize(1500, 950)
+    w.showMaximized()
+    w.cards, w.status = cards, status
+    return app, w
+
+
+def self_test():
+    global VINTAGE, HOME
+    tmp = tempfile.mkdtemp()
+    try:
+        HOME, VINTAGE = tmp, os.path.join(tmp, "Vintage")
+        assert len({m["id"] for m in MACHINES}) == len(MACHINES)
+        for m in MACHINES:
+            d = make_folder(m)
+            assert os.path.isfile(os.path.join(d, "README.txt"))
+        cmd = dos_command(BY_ID["dos"])
+        text = open(cmd[-1], encoding="utf-8").read()
+        assert "mount c" in text and "C drive" in text and "[dosbox]" in text
+        with open(cmd[-1], "a", encoding="utf-8") as f:       # the family's own edits survive
+            f.write("")
+        text2 = open(dos_command(BY_ID["dos"])[-1], encoding="utf-8").read()
+        assert text2.count("[autoexec]") == 1
+        w9 = BY_ID["win9x"]
+        assert missing(w9)
+        inst = open(win9x_install_command(w9, "/x/Win98.iso")[-1], encoding="utf-8").read()
+        assert "imgmake" in inst and "win98\\setup.exe" in inst and "/x/Win98.iso" in inst
+        open(win9x_disk(w9), "wb").close()
+        assert not missing(w9)
+        assert "boot c:" in open(win9x_command(w9)[-1], encoding="utf-8").read()
+        mac = BY_ID["mac"]
+        assert missing(mac)
+        open(os.path.join(folder(mac), "MAC.ROM"), "wb").close()
+        open(os.path.join(folder(mac), "System 7.dsk"), "wb").close()
+        assert not missing(mac)
+        prefs = open(mac_prefs(mac), encoding="utf-8").read()
+        assert "rom " in prefs and "System 7.dsk" in prefs
+        st = BY_ID["atarist"]
+        open(os.path.join(folder(st), "b.st"), "wb").close()
+        open(os.path.join(folder(st), "a.st"), "wb").close()
+        assert command(st)[-1].endswith("a.st")
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        _app, w = window()
+        assert w.windowTitle() == "Vintage Computers" and len(w.cards) == len(MACHINES)
+        w.close()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    print("vintage self-test ok")
+
+
+def main():
+    args = sys.argv[1:]
+    if "--self-test" in args:
+        self_test()
+        return 0
+    if "--start" in args:
+        m = BY_ID.get(args[args.index("--start") + 1] if len(args) > args.index("--start") + 1 else "")
+        if m and installed(m["app"]) and not missing(m):
+            os.execvp(command(m)[0], command(m))
+    app, _w = window()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

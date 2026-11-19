@@ -110,6 +110,9 @@ ICONS = {
             '<circle cx="31" cy="22.5" r="1.6"/><circle cx="35.5" cy="27.5" r="1.6"/>',
     "retro": '<rect x="8" y="31" width="32" height="9" rx="3"/><path d="M22 31V17"/><circle cx="22" cy="12" r="5"/>'
              '<circle cx="33" cy="26.5" r="2.2"/>',
+    # an old desktop computer: a box screen on a case with a floppy slot
+    "vintage": '<rect x="10" y="6" width="28" height="22" rx="3"/><rect x="15" y="11" width="18" height="12" rx="1.5"/>'
+               '<rect x="7" y="31" width="34" height="11" rx="2.5"/><path d="M12 36.5h12M31 36.5h4"/>',
     "web": '<circle cx="24" cy="24" r="17"/><ellipse cx="24" cy="24" rx="7.5" ry="17"/><path d="M7 24h34M10 15h28M10 33h28"/>',
     "add": '<circle cx="24" cy="24" r="17"/><path d="M24 15v18M15 24h18"/>',
     # restart into another system: a circular arrow around a small window

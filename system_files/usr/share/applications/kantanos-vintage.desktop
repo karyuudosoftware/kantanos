@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Vintage Computers
+Name[ja]=レトロパソコン
+Comment=Old computers: DOS, Windows 95/98, Amiga, Atari ST, Commodore 64, classic Mac, MSX, ZX Spectrum
+Exec=/usr/libexec/kantanos/vintage
+Icon=computer-laptop
+Categories=Game;Emulator;
+Keywords=dos;dosbox;windows 95;windows 98;amiga;atari;c64;commodore;mac;msx;spectrum;emulator;
