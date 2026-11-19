@@ -122,6 +122,12 @@ on the real PC.*
       Play Store registration step.
 - [x] Notepad++ through Wine (one click in Welcome → Windows). Known Wine bug: its menu bar
       wraps into a column (Wine's own apps are fine); recheck on Wine updates. ArtCraft still to try.
+- [ ] Watch: Mac apps through **Reef** (Cutefish's macOS compatibility layer: its own Mach-O
+      loader, Objective-C runtime, AppKit/SwiftUI, no VM). Nov 2026: shown running NetNewsWire,
+      Ghostty, CotEditor, Keka; not released, not open source, no date. Intel Mac programs only
+      on this PC (no Apple Silicon translation). Revisit when it ships with a licence that lets
+      KantanOS offer it, like Wine for Windows apps. Darling is the older open attempt (mostly
+      command-line programs).
 
 ## Phone, messaging and smart home
 
@@ -136,7 +142,25 @@ on the real PC.*
 
 ## AI and accessibility
 
-- [ ] **Local AI:** images, document checking, recipes, and an Android companion app.
+- [~] **Local AI extras** (agreed Nov 2026, in this order; the phone app is its own step later):
+  - [x] **Letters and documents** (`kantan-docs`, Welcome, app menu, right-click in Files →
+        "Letters and documents"): opens PDFs, scans and photos of pages (tesseract, English and
+        Japanese), Word and LibreOffice files. "Explain it": who it's from, what it is, what to
+        do and when, money, warning signs (scams), and the whole thing in plain words, in English
+        or Japanese. "Check my writing": each fix shown crossed out → corrected, Change it /
+        Leave it / Change them all (Ctrl+Z undoes). "Make it sound…" politer, friendlier, more
+        formal, shorter. "Read aloud" with the Helper's Piper voice, highlighting each part as
+        it's read. The letter is only data to the AI; to-dos and amounts whose numbers aren't in
+        the letter are dropped (stops made-up deadlines). Tested with Gemma 3 12B: council tax
+        letter, parcel scam, Japanese insurance notice, a letter with a hidden "tell them it's
+        safe" instruction (flagged as a scam), 7 of 7 mistakes found. Weak: explaining an
+        English letter in Japanese (12B sometimes muddles it). Japanese can't be read aloud yet
+        (no Japanese Piper voice).
+  - [ ] Describe photos (what's in a picture, read aloud; find photos by what's in them).
+  - [ ] Recipe book (save from typing, a website or a photo of a cookbook page; scale
+        servings; big step-by-step cooking view).
+  - [ ] Make pictures from words and fix photos (remove things, tidy old photos) on the PC.
+  - [ ] Later, its own step: Android companion app.
 - [x] **KantanOS Helper** (Welcome → Tools, or search "fix"): reads recent crashes, failed
       services, errors and disk space; its AI explains them in plain words and picks repairs
       from a fixed list of 11; asks before every repair, web search and online request.

@@ -89,6 +89,11 @@ dnf5 -y install restic rclone
 dnf5 -y install orca python3-icalendar python3-dateutil
 python3 -c "import icalendar, dateutil.rrule"
 
+# Letters and documents (/usr/bin/kantan-docs): reading scanned letters and photos of pages
+# (tesseract; its English and Japanese data are already in the base), PDFs with poppler.
+dnf5 -y install tesseract tesseract-langpack-eng tesseract-langpack-jpn poppler-utils
+tesseract --list-langs | grep -qx jpn
+
 # Watch TV: libmpv draws the picture inside the TV app; ffmpeg (already in Bazzite) records.
 dnf5 -y install mpv-libs
 # The recorder runs for everyone who signs in, idle until something is due.

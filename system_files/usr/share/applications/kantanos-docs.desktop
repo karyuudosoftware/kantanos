@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Letters and documents
+Name[ja]=手紙と書類
+Comment=Explain a letter in plain words, check your writing, read anything aloud
+Exec=kantan-docs %f
+Icon=document-preview
+Categories=Office;Utility;
+Keywords=letter;document;explain;proofread;spelling;grammar;read aloud;pdf;scan;

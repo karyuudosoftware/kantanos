@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Service
+MimeType=application/pdf;image/png;image/jpeg;image/tiff;image/bmp;image/webp;application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/vnd.oasis.opendocument.text;text/plain;text/markdown;
+Actions=explain;read
+X-KDE-Submenu=Letters and documents
+X-KDE-StartupNotify=false
+
+[Desktop Action explain]
+Name=Explain this letter
+Icon=help-about
+Exec=kantan-docs --explain %f
+
+[Desktop Action read]
+Name=Read it aloud
+Icon=media-playback-start
+Exec=kantan-docs --read %f
