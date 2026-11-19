@@ -1,0 +1,1485 @@
+#!/usr/bin/python3
+"""KantanOS Watch TV: live TV like a cable box, for the remote, keyboard or mouse.
+
+  Up / Down, Page Up / Down, CH+ / CH-   next / previous channel (in the list you picked it from)
+  0-9                                     type a channel number
+  OK / Enter                              what's on (press again for the guide)
+  Right, G, Guide, Menu                   the guide: countries, topics, what's on when
+  Left, Back-and-forth                    the channel you watched before
+  R, Record                               record what's on (or the programme chosen in the guide)
+  F                                       favourite channel
+  /, S, Search                            find a channel or show: "star trek*", "*news*" (* = anything, ? = one letter)
+  Esc / Back                              close; press twice to leave
+  Mouse: click for what's on, right-click for the guide, wheel to change channel, double-click for full screen.
+
+Channels and sorting: /usr/share/kantanos/tv/lineup.py. Guide: guide.py. Recordings: recorder.py
+and the kantanos-tv-recorder user service.
+"""
+import json
+import os
+import sys
+import threading
+import time
+
+sys.path.insert(0, "/usr/share/kantanos/tv")
+import guide  # noqa: E402
+import lineup  # noqa: E402
+import recorder  # noqa: E402
+
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, Signal  # noqa: E402
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPen  # noqa: E402
+from PySide6.QtWidgets import (QApplication, QCheckBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout,  # noqa: E402
+                               QLabel, QLineEdit, QListWidget, QListWidgetItem, QMenu, QPushButton,
+                               QScrollArea, QVBoxLayout, QWidget)
+
+TITLE = "Watch TV"
+FAVS = os.path.join(lineup.DATA, "favourites.json")
+STATE = os.path.join(lineup.DATA, "state.json")
+BROKEN = os.path.join(lineup.DATA, "not-working.json")
+TUNE_TIMEOUT = 15000
+COUNTRY_NAMES = {"US": "United States", "CA": "Canada", "GB": "United Kingdom", "JP": "Japan", "AU": "Australia",
+                 "NZ": "New Zealand", "IE": "Ireland", "FR": "France", "DE": "Germany", "ES": "Spain", "IT": "Italy",
+                 "MX": "Mexico", "BR": "Brazil", "AR": "Argentina", "CL": "Chile", "IN": "India", "KR": "South Korea",
+                 "PH": "Philippines", "NL": "Netherlands", "SE": "Sweden", "NO": "Norway", "DK": "Denmark",
+                 "PT": "Portugal", "PL": "Poland", "TW": "Taiwan", "CN": "China", "HK": "Hong Kong"}
+BG = "rgba(12,16,24,215)"
+ACCENT = QColor(80, 160, 255)
+
+
+def jload(path, default):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def jsave(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(path + ".tmp", path)
+
+
+def clock(t):
+    return time.strftime("%-I:%M %p", time.localtime(t)).lower().replace(" ", "")
+
+
+def country_name(cc):
+    return COUNTRY_NAMES.get(cc, cc)
+
+
+def big(widget, scale=1.4, bold=False):
+    f = widget.font()
+    f.setPointSizeF(f.pointSizeF() * scale)
+    f.setBold(bold)
+    widget.setFont(f)
+    return widget
+
+
+def tv_menu(parent):
+    """A pop-up choice big enough to read from the sofa."""
+    m = QMenu(parent)
+    m.setStyleSheet(f"QMenu {{ background: {BG}; color: white; border: 1px solid #3a4a60; border-radius: 12px; "
+                    "padding: 10px; } QMenu::item { padding: 16px 34px; border-radius: 8px; } "
+                    "QMenu::item:selected { background: #3a78c8; }")
+    big(m, 1.8)
+    return m
+
+
+def show_menu(m, pos):
+    if m.actions():
+        m.setActiveAction(m.actions()[0])           # the first choice is lit, so OK picks it
+    m.exec(pos)
+
+
+# ---- the info bar along the bottom ----------------------------------------------------------
+class InfoBar(QFrame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setStyleSheet(f"InfoBar {{ background: {BG}; border-radius: 18px; }} QLabel {{ color: white; }}")
+        g = QGridLayout(self)
+        g.setContentsMargins(28, 18, 28, 18)
+        self.num = big(QLabel(), 2.6, True)
+        self.name = big(QLabel(), 1.7, True)
+        self.where = big(QLabel(), 1.05)
+        self.where.setStyleSheet("color: #aab8cc;")
+        self.clock = big(QLabel(), 1.5)
+        self.now = big(QLabel(), 1.35, True)
+        self.now.setWordWrap(True)
+        self.times = big(QLabel(), 1.05)
+        self.times.setStyleSheet("color: #aab8cc;")
+        self.bar = QFrame()
+        self.bar.setFixedHeight(6)
+        self.fill = QFrame(self.bar)
+        self.fill.setStyleSheet("background: #50a0ff; border-radius: 3px;")
+        self.bar.setStyleSheet("background: rgba(255,255,255,40); border-radius: 3px;")
+        self.next = big(QLabel(), 1.1)
+        self.next.setStyleSheet("color: #d0d8e4;")
+        self.badges = big(QLabel(), 1.2, True)
+        self.hint = QLabel("OK: guide · R: record · F: favourite")
+        self.hint.setStyleSheet("color: #8090a8;")
+        g.addWidget(self.num, 0, 0, 2, 1, Qt.AlignmentFlag.AlignTop)
+        g.addWidget(self.name, 0, 1)
+        g.addWidget(self.badges, 0, 2, Qt.AlignmentFlag.AlignRight)
+        g.addWidget(self.clock, 0, 3, Qt.AlignmentFlag.AlignRight)
+        g.addWidget(self.where, 1, 1, 1, 3)
+        g.addWidget(self.now, 2, 1, 1, 3)
+        g.addWidget(self.times, 3, 1, 1, 3)
+        g.addWidget(self.bar, 4, 1, 1, 3)
+        g.addWidget(self.next, 5, 1, 1, 2)
+        g.addWidget(self.hint, 5, 3, Qt.AlignmentFlag.AlignRight)
+        g.setColumnStretch(1, 1)
+        g.setColumnMinimumWidth(0, 150)
+
+    def show_for(self, ch, progs, shelf, recording, fav):
+        self.num.setText(str(ch.get("number") or ""))
+        self.name.setText(ch["name"])
+        svc = ", ".join(dict.fromkeys(s["service"] for s in ch["streams"]))
+        self.where.setText(f"{country_name(ch['country'])} · {shelf} · {svc}")
+        self.clock.setText(clock(time.time()))
+        b = []
+        if recording:
+            b.append("<span style='color:#ff5050'>● REC</span>")
+        if fav:
+            b.append("<span style='color:#ffd040'>★</span>")
+        self.badges.setText("  ".join(b))
+        now = progs[0] if progs and progs[0]["start"] <= time.time() else None
+        nxt = progs[1] if now and len(progs) > 1 else (progs[0] if progs and not now else None)
+        if now:
+            ep = f"  ({now['ep']})" if now["ep"] else ""
+            self.now.setText(now["title"] + (f": {now['sub']}" if now["sub"] and now["sub"] != now["title"] else "") + ep)
+            self.times.setText(f"{clock(now['start'])} – {clock(now['stop'])}")
+            frac = (time.time() - now["start"]) / max(1, now["stop"] - now["start"])
+            self.bar.show()
+            QTimer.singleShot(0, lambda: self.fill.setGeometry(0, 0, int(self.bar.width() * min(1, frac)), 6))
+        else:
+            self.now.setText("No guide for this channel" if not progs else "")
+            self.times.setText("")
+            self.bar.hide()
+        self.next.setText(f"Next: {clock(nxt['start'])}  {nxt['title']}" if nxt else "")
+
+
+# ---- the guide ------------------------------------------------------------------------------
+class Guide(QWidget):
+    """Left: country and shelves (Favourites, News, TV shows › Comedy, ...). Right: what's on
+    when, drawn as a grid. Arrow keys move, OK watches or offers to record."""
+    watch = Signal(dict, list)
+    options = Signal(dict, object)
+
+    SLOT = 1800
+
+    def __init__(self, tv):
+        super().__init__(tv)
+        self.tv = tv
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.shelves = []           # [(label, filter, indent)]
+        self.shelf = 0
+        self.focus_left = False
+        self.rows = []
+        self.row = 0
+        self.top = 0
+        self.cursor = time.time()
+        self.t0 = self.slot_floor(time.time())
+        self.cache = {}
+        f = self.font()
+        f.setPointSizeF(f.pointSizeF() * 1.25)
+        self.setFont(f)
+
+    @staticmethod
+    def slot_floor(t):
+        return int(t // Guide.SLOT * Guide.SLOT)
+
+    # data ---------------------------------------------------------------------------------
+    def open(self, country, shelf_filter=None, channel=None):
+        self.country = country
+        self.build_shelves()
+        if shelf_filter is not None:
+            for i, (_l, f, _ind) in enumerate(self.shelves):
+                if f == shelf_filter:
+                    self.shelf = i
+                    break
+        self.load_rows(channel)
+        self.t0 = self.slot_floor(time.time())
+        self.cursor = time.time()
+        self.focus_left = False
+        self.cache.clear()
+        self.show()
+        self.raise_()
+        self.setFocus()
+        self.update()
+
+    def build_shelves(self):
+        lu = self.tv.lu
+        sh = [("country", None, 0), ("🔍 Search…", {"search": True}, 0),
+              ("★ Favourites", {"fav": True}, 0), ("Recently watched", {"recent": True}, 0),
+              ("All channels", {"country": self.country}, 0)]
+        for t, label, subs, n in lu.shelves(self.country):
+            sh.append((f"{label}  ({n})", {"country": self.country, "topic": t}, 0))
+            if len(subs) > 1 or (subs and subs[0][1] < n):
+                for s, k in subs:
+                    sh.append((f"{s}  ({k})", {"country": self.country, "topic": t, "sub": s}, 1))
+        self.shelves = sh
+        self.shelf = min(self.shelf, len(sh) - 1) if self.shelf else 4
+
+    def channels_for(self, f):
+        if f is None or f.get("search"):
+            return []
+        if f.get("fav"):
+            return [c for c in self.tv.lu.channels if c["key"] in self.tv.favs]
+        if f.get("recent"):
+            return [self.tv.lu.by_key[k] for k in self.tv.recent if k in self.tv.lu.by_key]
+        return self.tv.lu.pick(f.get("country"), f.get("topic"), f.get("sub"))
+
+    def load_rows(self, channel=None):
+        self.rows = self.channels_for(self.shelves[self.shelf][1])
+        self.row = 0
+        if channel:
+            for i, c in enumerate(self.rows):
+                if c["key"] == channel["key"]:
+                    self.row = i
+        self.top = max(0, self.row - 2)
+        self.cache.clear()
+
+    def progs(self, c):
+        k = (c["key"], self.t0)
+        if k not in self.cache:
+            self.cache[k] = guide.window(self.tv.db, [c["key"]], self.t0 - 4 * 3600, self.t0 + 6 * 3600)[c["key"]]
+        return self.cache[k]
+
+    def selected_prog(self):
+        if not self.rows:
+            return None
+        for p in self.progs(self.rows[self.row]):
+            if p["start"] <= self.cursor < p["stop"]:
+                return p
+        return None
+
+    # geometry -----------------------------------------------------------------------------
+    def metrics(self):
+        fm = QFontMetrics(self.font())
+        rh = int(fm.height() * 2.6)
+        left = int(self.width() * 0.22)
+        name_w = int(self.width() * 0.17)
+        head = int(fm.height() * 2.2)
+        foot = int(fm.height() * 5.2)
+        grid_x = left + name_w
+        grid_w = self.width() - grid_x - 20
+        span = 2.5 * 3600
+        return fm, rh, left, name_w, head, foot, grid_x, grid_w, span
+
+    def visible_rows(self):
+        fm, rh, *_rest = self.metrics()
+        head, foot = _rest[2], _rest[3]
+        return max(1, (self.height() - head - foot - 20) // rh)
+
+    # drawing ------------------------------------------------------------------------------
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.fillRect(self.rect(), QColor(10, 14, 22, 235))
+        fm, rh, left, name_w, head, foot, gx, gw, span = self.metrics()
+        now = time.time()
+        # shelves
+        y = 20
+        lh = int(fm.height() * 1.7)
+        first = max(0, self.shelf - (self.height() - 60) // lh + 3)
+        for i in range(first, len(self.shelves)):
+            label, f, ind = self.shelves[i]
+            if y > self.height() - lh:
+                break
+            r = QRect(16, y, left - 28, lh - 4)
+            if i == self.shelf:
+                p.setBrush(ACCENT if self.focus_left else QColor(60, 80, 110))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.drawRoundedRect(r, 10, 10)
+            p.setPen(QColor("white") if i == self.shelf else QColor(200, 210, 225))
+            if f is None:
+                txt = f"◀  {country_name(self.country)}  ▶" if len(self.tv.lu.countries()) > 1 else country_name(self.country)
+                font = QFont(self.font())
+                font.setBold(True)
+                p.setFont(font)
+                p.drawText(r, Qt.AlignmentFlag.AlignCenter, txt)
+                p.setFont(self.font())
+            else:
+                p.drawText(r.adjusted(14 + ind * 26, 0, -8, 0), Qt.AlignmentFlag.AlignVCenter, label)
+            y += lh
+        # time row
+        p.setPen(QColor(170, 185, 205))
+        for k in range(6):
+            t = self.t0 + k * self.SLOT
+            x = gx + int((t - self.t0) / span * gw)
+            if x < gx + gw - 40:
+                p.drawText(QRect(x + 6, 14, 200, head - 14), Qt.AlignmentFlag.AlignVCenter, clock(t))
+        p.drawText(QRect(left, 14, name_w, head - 14), Qt.AlignmentFlag.AlignVCenter,
+                   time.strftime("%A %-d %B", time.localtime(self.t0)))
+        # rows
+        vis = self.visible_rows()
+        if self.row < self.top:
+            self.top = self.row
+        if self.row >= self.top + vis:
+            self.top = self.row - vis + 1
+        y = head + 10
+        if not self.rows:
+            p.setPen(QColor(200, 210, 225))
+            f = self.shelves[self.shelf][1] or {}
+            msg = "No favourites yet: press F on a channel to add it." if f.get("fav") else \
+                "Press OK to search for a channel or show (* = anything)." if f.get("search") else "Nothing here yet."
+            p.drawText(QRect(gx - name_w, y, gw + name_w, rh), Qt.AlignmentFlag.AlignCenter, msg)
+        sched = self.tv.scheduled_keys()
+        for i in range(self.top, min(len(self.rows), self.top + vis)):
+            c = self.rows[i]
+            sel_row = i == self.row
+            broken = self.tv.is_broken(c)
+            nr = QRect(left, y, name_w - 8, rh - 6)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(40, 55, 80) if sel_row else QColor(28, 34, 46))
+            p.drawRoundedRect(nr, 8, 8)
+            p.setPen(QColor(120, 130, 145) if broken else QColor("white"))
+            p.drawText(nr.adjusted(12, 0, -6, 0), Qt.AlignmentFlag.AlignVCenter,
+                       fm.elidedText(f"{c['number']}  {c['name']}", Qt.TextElideMode.ElideRight, name_w - 30))
+            progs = self.progs(c)
+            if not progs:
+                r = QRect(gx, y, gw, rh - 6)
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor(50, 70, 100) if sel_row and not self.focus_left else QColor(24, 30, 40))
+                p.drawRoundedRect(r, 8, 8)
+                p.setPen(QColor(150, 160, 175))
+                p.drawText(r.adjusted(12, 0, -6, 0), Qt.AlignmentFlag.AlignVCenter,
+                           "Not working right now" if broken else "No guide for this channel")
+            for pr in progs:
+                x1 = gx + int((pr["start"] - self.t0) / span * gw)
+                x2 = gx + int((pr["stop"] - self.t0) / span * gw)
+                x1, x2 = max(x1, gx), min(x2, gx + gw)
+                if x2 - x1 < 4:
+                    continue
+                r = QRect(x1 + 2, y, x2 - x1 - 4, rh - 6)
+                chosen = sel_row and not self.focus_left and pr["start"] <= self.cursor < pr["stop"]
+                on_now = pr["start"] <= now < pr["stop"]
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(ACCENT if chosen else (QColor(38, 50, 70) if on_now else QColor(28, 34, 46)))
+                p.drawRoundedRect(r, 8, 8)
+                p.setPen(QColor("white"))
+                rec = (c["key"], pr["start"]) in sched
+                txt = ("● " if rec else "") + pr["title"]
+                p.drawText(r.adjusted(10, 0, -6, 0), Qt.AlignmentFlag.AlignVCenter,
+                           fm.elidedText(txt, Qt.TextElideMode.ElideRight, max(0, r.width() - 16)))
+            y += rh
+        # now line
+        xn = gx + int((now - self.t0) / span * gw)
+        if gx <= xn <= gx + gw:
+            p.setPen(QPen(QColor(255, 80, 80), 3))
+            p.drawLine(xn, head, xn, y)
+        # details of the chosen programme
+        p.setPen(QColor("white"))
+        dr = QRect(left, self.height() - foot, self.width() - left - 30, foot - 16)
+        pr = None if self.focus_left else self.selected_prog()
+        if pr:
+            font = QFont(self.font())
+            font.setBold(True)
+            font.setPointSizeF(font.pointSizeF() * 1.15)
+            p.setFont(font)
+            head_txt = pr["title"] + (f": {pr['sub']}" if pr["sub"] and pr["sub"] != pr["title"] else "")
+            p.drawText(dr.adjusted(0, 0, 0, -dr.height() + int(fm.height() * 1.6)), Qt.AlignmentFlag.AlignLeft, head_txt)
+            p.setFont(self.font())
+            p.setPen(QColor(170, 185, 205))
+            meta = f"{clock(pr['start'])} – {clock(pr['stop'])}" + (f"   {pr['ep']}" if pr["ep"] else "") + \
+                   (f"   {pr['cats']}" if pr["cats"] else "")
+            p.drawText(dr.adjusted(0, int(fm.height() * 1.6), 0, 0), Qt.AlignmentFlag.AlignLeft, meta)
+            p.setPen(QColor(215, 222, 232))
+            p.drawText(dr.adjusted(0, int(fm.height() * 2.8), 0, 0), Qt.TextFlag.TextWordWrap, pr["descr"][:400])
+        else:
+            p.setPen(QColor(150, 165, 185))
+            p.drawText(dr, Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap,
+                       "Up and down to choose, OK to watch. Right goes into the guide; R records; F adds a "
+                       "favourite; / searches; Esc closes. Recordings and settings: the Menu key or M.")
+
+    # keys and mouse -----------------------------------------------------------------------
+    def keyPressEvent(self, e):
+        k = e.key()
+        if k in (Qt.Key.Key_Escape, Qt.Key.Key_Back, Qt.Key.Key_Backspace):
+            self.hide()
+            self.tv.setFocus()
+            return
+        if k in (Qt.Key.Key_M, Qt.Key.Key_Menu):
+            self.tv.open_menu()
+            return
+        if k in (Qt.Key.Key_Slash, Qt.Key.Key_Search, Qt.Key.Key_S) or \
+                (self.focus_left and (self.shelves[self.shelf][1] or {}).get("search") and
+                 k in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Select, Qt.Key.Key_Right)):
+            self.tv.open_search()
+            return
+        if self.focus_left:
+            self.keys_left(k)
+        else:
+            self.keys_grid(k, e.text())
+        self.update()
+
+    def keys_left(self, k):
+        if k == Qt.Key.Key_Up:
+            self.shelf = max(0, self.shelf - 1)
+        elif k == Qt.Key.Key_Down:
+            self.shelf = min(len(self.shelves) - 1, self.shelf + 1)
+        elif self.shelves[self.shelf][1] is None and k in (Qt.Key.Key_Left, Qt.Key.Key_Right):
+            cs = self.tv.lu.countries()
+            if len(cs) > 1:
+                i = (cs.index(self.country) + (1 if k == Qt.Key.Key_Right else -1)) % len(cs)
+                self.country = cs[i]
+                self.build_shelves()
+                self.shelf = 0
+            return
+        elif k in (Qt.Key.Key_Right, Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Select):
+            if self.rows:
+                self.focus_left = False
+            return
+        if self.shelves[self.shelf][1] is not None:
+            self.load_rows()
+
+    def keys_grid(self, k, text):
+        if not self.rows:
+            if k == Qt.Key.Key_Left:
+                self.focus_left = True
+            return
+        vis = self.visible_rows()
+        c = self.rows[self.row]
+        progs = self.progs(c)
+        if k == Qt.Key.Key_Up:
+            self.row = max(0, self.row - 1)
+        elif k == Qt.Key.Key_Down:
+            self.row = min(len(self.rows) - 1, self.row + 1)
+        elif k in (Qt.Key.Key_PageUp, Qt.Key.Key_ChannelUp):
+            self.row = max(0, self.row - vis)
+        elif k in (Qt.Key.Key_PageDown, Qt.Key.Key_ChannelDown):
+            self.row = min(len(self.rows) - 1, self.row + vis)
+        elif k == Qt.Key.Key_Right:
+            nxt = [p for p in progs if p["start"] > self.cursor]
+            self.cursor = nxt[0]["start"] if nxt else self.cursor + self.SLOT
+            while self.cursor > self.t0 + 2 * 3600:
+                self.t0 += self.SLOT
+        elif k == Qt.Key.Key_Left:
+            cur = self.selected_prog()
+            start = cur["start"] if cur else self.cursor - self.SLOT + 1
+            if start <= time.time():                 # already on what's on now: over to the shelves
+                self.focus_left = True
+                self.cursor = time.time()
+                self.t0 = self.slot_floor(time.time())
+                return
+            prev = [p for p in progs if p["stop"] <= start + 1]
+            self.cursor = max(prev[-1]["start"] if prev else start - 1, time.time())
+            while self.cursor < self.t0:
+                self.t0 -= self.SLOT
+        elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Select):
+            pr = self.selected_prog()
+            if pr and pr["start"] > time.time() + 60:
+                self.options.emit(c, pr)
+            else:
+                self.watch.emit(c, self.rows)
+        elif k in (Qt.Key.Key_R, Qt.Key.Key_MediaRecord):
+            self.options.emit(c, self.selected_prog())
+        elif k == Qt.Key.Key_F:
+            self.tv.toggle_fav(c)
+        elif text.isdigit():
+            self.tv.digit(text)
+        self.cursor = max(self.cursor, time.time())   # the guide only looks forward
+
+    def mousePressEvent(self, e):
+        fm, rh, left, name_w, head, foot, gx, gw, span = self.metrics()
+        pos = e.position().toPoint()
+        if pos.x() < left:
+            lh = int(fm.height() * 1.7)
+            first = max(0, self.shelf - (self.height() - 60) // lh + 3)
+            i = first + (pos.y() - 20) // lh
+            if 0 <= i < len(self.shelves):
+                if self.shelves[i][1] is None:
+                    self.keys_left(Qt.Key.Key_Right)
+                elif self.shelves[i][1].get("search"):
+                    self.tv.open_search()
+                    return
+                else:
+                    self.shelf = i
+                    self.focus_left = True
+                    self.load_rows()
+        elif head + 10 <= pos.y() < self.height() - foot:
+            i = self.top + (pos.y() - head - 10) // rh
+            if 0 <= i < len(self.rows):
+                self.row = i
+                self.focus_left = False
+                if pos.x() >= gx:
+                    self.cursor = max(time.time(), self.t0 + (pos.x() - gx) / gw * span)
+                if e.button() == Qt.MouseButton.RightButton:
+                    self.options.emit(self.rows[i], self.selected_prog())
+        self.update()
+
+    def mouseDoubleClickEvent(self, e):
+        if self.rows and not self.focus_left:
+            pr = self.selected_prog()
+            if pr and pr["start"] > time.time() + 60:
+                self.options.emit(self.rows[self.row], pr)
+            else:
+                self.watch.emit(self.rows[self.row], self.rows)
+
+    def wheelEvent(self, e):
+        step = -1 if e.angleDelta().y() > 0 else 1
+        self.row = min(max(0, self.row + step * 3), max(0, len(self.rows) - 1))
+        self.update()
+
+
+# ---- recordings and settings ----------------------------------------------------------------
+class Panel(QFrame):
+    """A big, simple full-screen page over the TV picture."""
+
+    def __init__(self, tv, title):
+        super().__init__(tv)
+        self.tv = tv
+        self.setStyleSheet(f"Panel {{ background: rgba(10,14,22,252); }} QLabel {{ color: white; }} "
+                           "QCheckBox { color: white; spacing: 12px; } QListWidget { background: rgba(255,255,255,12); "
+                           "color: white; border: none; border-radius: 10px; } QListWidget::item { padding: 12px; } "
+                           "QListWidget::item:selected { background: #3a78c8; border-radius: 8px; } "
+                           "QPushButton { padding: 10px 22px; }")
+        f = self.font()
+        f.setPointSizeF(f.pointSizeF() * 1.25)
+        self.setFont(f)
+        self.lay = QVBoxLayout(self)
+        self.lay.setContentsMargins(80, 50, 80, 40)
+        self.lay.setSpacing(14)
+        self.head = big(QLabel(title), 2.0, True)
+        self.lay.addWidget(self.head)
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key.Key_Escape, Qt.Key.Key_Back):
+            self.close_panel()
+        elif e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Select):
+            e.accept()          # lists pass OK on after acting on it; it must not reach the TV underneath
+        else:
+            super().keyPressEvent(e)
+
+    def close_panel(self):
+        self.hide()
+        self.tv.setFocus()
+
+
+class Recordings(Panel):
+    def __init__(self, tv):
+        super().__init__(tv, "Recordings")
+        self.note = QLabel()
+        self.note.setStyleSheet("color: #aab8cc;")
+        self.note.setWordWrap(True)
+        self.list = QListWidget()
+        self.list.itemActivated.connect(self.chosen)
+        row = QHBoxLayout()
+        self.settings_btn = QPushButton(QIcon.fromTheme("configure"), "Settings")
+        self.settings_btn.clicked.connect(lambda: (self.hide(), self.tv.open_settings()))
+        close = QPushButton(QIcon.fromTheme("window-close"), "Back to TV")
+        close.clicked.connect(self.close_panel)
+        find = QPushButton(QIcon.fromTheme("search"), "Search")
+        find.clicked.connect(lambda: (self.hide(), self.tv.open_search()))
+        row.addWidget(find)
+        row.addWidget(self.settings_btn)
+        row.addStretch()
+        row.addWidget(close)
+        self.lay.addWidget(self.note)
+        self.lay.addWidget(self.list, 1)
+        self.lay.addLayout(row)
+
+    def open(self):
+        self.fill()
+        self.setGeometry(self.tv.rect())
+        self.show()
+        self.raise_()
+        self.list.setFocus()
+        if self.list.count():
+            self.list.setCurrentRow(0)
+
+    def fill(self):
+        self.list.clear()
+        s = recorder.load_schedule()
+        st = recorder.load_status()
+        now = time.time()
+        words = {"scheduled": "Will record", "recording": "● Recording now", "done": "Recorded",
+                 "failed": "Didn't work", "missed": "Missed (the PC was off or asleep)", "cancelled": "Cancelled"}
+        items = sorted(s["items"], key=lambda it: (recorder.state_of(it, st, now) not in ("recording",),
+                                                  recorder.state_of(it, st, now) in ("done", "failed", "missed", "cancelled"),
+                                                  -it["start"] if recorder.state_of(it, st, now) == "done" else it["start"]))
+        for it in items:
+            state = recorder.state_of(it, st, now)
+            when = time.strftime("%a %-d %b, ", time.localtime(it["start"])) + clock(it["start"])
+            text = f"{words[state]}:  {it['title']}" + (f": {it['sub']}" if it.get("sub") else "") + \
+                   f"\n{when}  ·  {it['channel']}"
+            if state == "failed" and st.get(it["id"], {}).get("why"):
+                text += f"  ·  {st[it['id']]['why'][:80]}"
+            li = QListWidgetItem(text)
+            li.setData(Qt.ItemDataRole.UserRole, ("item", it, state))
+            self.list.addItem(li)
+        for r in s["rules"]:
+            li = QListWidgetItem(f"Every episode:  {r['title']}\non {r['channel']}")
+            li.setData(Qt.ItemDataRole.UserRole, ("rule", r, None))
+            self.list.addItem(li)
+        folder = lineup.load_config().get("record_dir")
+        self.note.setText(f"Recordings are saved in {folder}. The PC stays awake while it records, but it can't "
+                          "wake itself up: leave it on (the screen can be off) when something is due."
+                          if self.list.count() else
+                          "Nothing recorded yet. In the guide, choose a programme and press R (or OK on a "
+                          "programme that hasn't started) to record it.")
+
+    def chosen(self, li):
+        kind, it, state = li.data(Qt.ItemDataRole.UserRole)
+        m = tv_menu(self)
+        if kind == "rule":
+            m.addAction("Stop recording every episode", lambda: (recorder.remove_rule(it["title"], it.get("key")), self.fill()))
+        elif state == "done":
+            files = [f for f in recorder.load_status().get(it["id"], {}).get("files", []) if os.path.exists(f)]
+            if files:
+                m.addAction("Watch it", lambda: (self.hide(), self.tv.play_file(files, it)))
+            m.addAction("Delete it", lambda: (recorder.forget(it["id"], delete_file=True), self.fill()))
+            m.addAction("Remove from the list, keep the file", lambda: (recorder.forget(it["id"]), self.fill()))
+        elif state in ("scheduled", "recording"):
+            m.addAction("Stop recording" if state == "recording" else "Don't record it",
+                        lambda: (recorder.cancel(it["id"]), QTimer.singleShot(1500, self.fill)))
+        else:
+            m.addAction("Remove from the list", lambda: (recorder.forget(it["id"], delete_file=True), self.fill()))
+        rect = self.list.visualItemRect(li)
+        show_menu(m, self.list.mapToGlobal(rect.center()))
+
+
+class Search(Panel):
+    """Find a channel or a show by typing. * means "anything", ? means "any one letter":
+    "star trek*", "*news*", "jeopardy". Plain words match anywhere in the name."""
+
+    def __init__(self, tv):
+        super().__init__(tv, "Search")
+        self.box = QLineEdit()
+        big(self.box, 1.3)
+        self.box.setPlaceholderText("A channel or show, e.g.  star trek*   or   *news*")
+        self.box.setClearButtonEnabled(True)
+        self.box.textChanged.connect(lambda _t: self.wait.start())
+        self.box.returnPressed.connect(self.to_results)
+        self.box.installEventFilter(self)
+        hint = QLabel("* stands for anything and ? for any one letter. Plain words are found anywhere in the name. "
+                      "Shows are found in the guide (now and the next three days).")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #aab8cc;")
+        self.where = QCheckBox("Only this country")
+        self.where.setStyleSheet("color: white;")
+        self.where.toggled.connect(lambda _b: self.run())
+        self.list = big(QListWidget(), 1.3)
+        self.list.itemActivated.connect(self.chosen)
+        self.count = QLabel()
+        self.count.setStyleSheet("color: #aab8cc;")
+        row = QHBoxLayout()
+        row.addWidget(self.count, 1)
+        row.addWidget(self.where)
+        close = QPushButton(QIcon.fromTheme("window-close"), "Back to TV")
+        close.clicked.connect(self.close_panel)
+        row.addWidget(close)
+        self.lay.addWidget(self.box)
+        self.lay.addWidget(hint)
+        self.lay.addWidget(self.list, 1)
+        self.lay.addLayout(row)
+        self.wait = QTimer(self, singleShot=True, interval=350, timeout=self.run)
+
+    def open(self):
+        self.setGeometry(self.tv.rect())
+        self.show()
+        self.raise_()
+        self.box.setFocus()
+        self.box.selectAll()
+        self.run()
+
+    def eventFilter(self, obj, e):
+        if obj is self.box and e.type() == QEvent.Type.KeyPress and e.key() == Qt.Key.Key_Down:
+            self.to_results()
+            return True
+        if obj is self.box and e.type() == QEvent.Type.KeyPress and e.key() in (Qt.Key.Key_Escape, Qt.Key.Key_Back):
+            self.close_panel()
+            return True
+        return super().eventFilter(obj, e)
+
+    def to_results(self):
+        if self.list.count():
+            self.list.setFocus()
+            self.list.setCurrentRow(1 if self.list.item(0).flags() == Qt.ItemFlag.NoItemFlags else 0)
+
+    def heading(self, text):
+        li = QListWidgetItem(text)
+        li.setFlags(Qt.ItemFlag.NoItemFlags)
+        f = self.list.font()
+        f.setBold(True)
+        li.setFont(f)
+        li.setForeground(QColor(170, 190, 220))
+        self.list.addItem(li)
+
+    def run(self):
+        self.list.clear()
+        text = self.box.text()
+        tv = self.tv
+        if not text.strip() or not tv.lu:
+            self.count.setText("")
+            return
+        countries = {tv.channel["country"]} if self.where.isChecked() and tv.channel else None
+        chans = lineup.search_channels(tv.lu, text, countries)
+        many = len(tv.lu.countries()) > 1
+        if chans:
+            self.heading(f"Channels ({len(chans)})")
+            for c in chans[:200]:
+                where = f"   ·   {country_name(c['country'])}" if many else ""
+                topic = lineup.TOPIC_NAMES.get(c["topic"], "") + (f" › {c['sub']}" if c["sub"] else "")
+                li = QListWidgetItem(f"{c['number']}   {c['name']}\n{topic}{where}")
+                li.setData(Qt.ItemDataRole.UserRole, ("channel", c, None))
+                self.list.addItem(li)
+        keys = {c["key"] for c in tv.lu.channels if not countries or c["country"] in countries}
+        progs = [p for p in guide.search(tv.db, text, keys) if p["ch"] in tv.lu.by_key]
+        if progs:
+            self.heading(f"Shows in the guide ({len(progs)})")
+            now = time.time()
+            for p in progs:
+                c = tv.lu.by_key[p["ch"]]
+                when = "On now" if p["start"] <= now else \
+                    (time.strftime("%a ", time.localtime(p["start"])) if p["start"] - now > 18 * 3600 else "") + \
+                    clock(p["start"])
+                title = p["title"] + (f": {p['sub']}" if p["sub"] and p["sub"] != p["title"] else "")
+                li = QListWidgetItem(f"{when}   {title}\n{c['number']}  {c['name']}")
+                li.setData(Qt.ItemDataRole.UserRole, ("prog", c, p))
+                self.list.addItem(li)
+        self.count.setText(f"{len(chans)} channels, {len(progs)} showings" if chans or progs else
+                           "Nothing found. Try fewer letters, or * around a word: *word*")
+
+    def chosen(self, li):
+        data = li.data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+        kind, c, p = data
+        if kind == "channel" or p["start"] <= time.time():
+            rows = [d[1] for d in (self.list.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.list.count()))
+                    if d and d[0] == "channel"] or [c]
+            self.hide()
+            self.tv.watch_search(c, rows)
+        else:
+            self.tv.record_options(c, p)
+
+
+class Settings(Panel):
+    countries_loaded = Signal(list)
+
+    def __init__(self, tv):
+        super().__init__(tv, "Watch TV settings")
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setStyleSheet("QScrollArea { background: transparent; border: none; } QScrollArea > QWidget > QWidget "
+                           "{ background: transparent; }")
+        inner = QWidget()
+        v = QVBoxLayout(inner)
+        v.addWidget(big(QLabel("Countries"), 1.2, True))
+        hint = QLabel("Each country gets its own channel list, numbered like a cable box: local stations first, "
+                      "then news in the 100s, sport in the 200s and so on.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #aab8cc;")
+        v.addWidget(hint)
+        self.chosen_label = QLabel()
+        self.chosen_label.setWordWrap(True)
+        v.addWidget(self.chosen_label)
+        self.country_filter = QLineEdit()
+        self.country_filter.setPlaceholderText("Find a country…")
+        self.country_filter.textChanged.connect(self.filter_countries)
+        v.addWidget(self.country_filter)
+        self.country_list = QListWidget()
+        self.country_list.setMinimumHeight(320)
+        self.country_list.itemChanged.connect(lambda _i: self.show_chosen())
+        v.addWidget(self.country_list)
+        self.chosen = set()
+        self.countries_loaded.connect(self.fill_countries)
+        v.addSpacing(10)
+        v.addWidget(big(QLabel("Where channels come from"), 1.2, True))
+        self.svc = {}
+        for sid, label in (("freetv", "Free TV: broadcasters that stream for free (from the iptv-org list)"),
+                           ("pluto", "Pluto TV free channels, with a full guide"),
+                           ("plex", "Plex free channels, with a full guide")):
+            b = QCheckBox(label)
+            self.svc[sid] = b
+            v.addWidget(b)
+        v.addSpacing(10)
+        v.addWidget(big(QLabel("Your own TV provider (optional)"), 1.2, True))
+        ph = QLabel("If you pay for an IPTV service, paste its playlist link (M3U) and guide link (XMLTV). They stay "
+                    "on this PC.")
+        ph.setWordWrap(True)
+        ph.setStyleSheet("color: #aab8cc;")
+        v.addWidget(ph)
+        self.p_name = QLineEdit()
+        self.p_name.setPlaceholderText("Name, e.g. My provider")
+        self.p_m3u = QLineEdit()
+        self.p_m3u.setPlaceholderText("Playlist link (http… .m3u)")
+        self.p_m3u.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
+        self.p_xml = QLineEdit()
+        self.p_xml.setPlaceholderText("Guide link (http… xmltv), if they have one")
+        self.p_xml.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
+        for w in (self.p_name, self.p_m3u, self.p_xml):
+            v.addWidget(w)
+        v.addSpacing(10)
+        v.addWidget(big(QLabel("Recordings"), 1.2, True))
+        rr = QHBoxLayout()
+        self.folder = QLabel()
+        self.folder.setWordWrap(True)
+        pick = QPushButton(QIcon.fromTheme("folder-open"), "Choose a folder…")
+        pick.clicked.connect(self.pick_folder)
+        rr.addWidget(self.folder, 1)
+        rr.addWidget(pick)
+        v.addLayout(rr)
+        fh = QLabel("A folder on your NAS works too, once it's connected (Welcome → Tools → Connect your NAS).")
+        fh.setStyleSheet("color: #aab8cc;")
+        fh.setWordWrap(True)
+        v.addWidget(fh)
+        v.addStretch()
+        area.setWidget(inner)
+        self.lay.addWidget(area, 1)
+        row = QHBoxLayout()
+        self.status = QLabel()
+        self.status.setStyleSheet("color: #aab8cc;")
+        save = QPushButton(QIcon.fromTheme("dialog-ok"), "Save and update channels")
+        save.clicked.connect(self.save)
+        close = QPushButton(QIcon.fromTheme("window-close"), "Back to TV")
+        close.clicked.connect(self.close_panel)
+        row.addWidget(self.status, 1)
+        row.addWidget(save)
+        row.addWidget(close)
+        self.lay.addLayout(row)
+
+    # countries: every country with free channels, found by typing --------------------------
+    def load_countries(self):
+        fallback = [{"code": cc, "name": n, "flag": "", "streams": 0, "guide": False} for cc, n in COUNTRY_NAMES.items()]
+        self.fill_countries(sorted(fallback, key=lambda x: x["name"]))
+
+        def work():
+            try:
+                self.countries_loaded.emit(lineup.country_list())
+            except (OSError, ValueError):
+                pass
+        threading.Thread(target=work, daemon=True).start()
+
+    def fill_countries(self, countries):
+        COUNTRY_NAMES.update({c["code"]: c["name"] for c in countries})
+        self.country_list.blockSignals(True)
+        self.country_list.clear()
+        for c in countries:
+            extra = []
+            if c["streams"]:
+                extra.append(f"{c['streams']} free channel{'' if c['streams'] == 1 else 's'}")
+            if c["guide"]:
+                extra.append("Pluto TV / Plex with a full guide")
+            li = QListWidgetItem(f"{c['flag']}  {c['name']}" + (f"   ·   {', '.join(extra)}" if extra else ""))
+            li.setData(Qt.ItemDataRole.UserRole, c["code"])
+            li.setFlags(li.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            li.setCheckState(Qt.CheckState.Checked if c["code"] in self.chosen else Qt.CheckState.Unchecked)
+            self.country_list.addItem(li)
+        self.country_list.blockSignals(False)
+        self.filter_countries(self.country_filter.text())
+        self.show_chosen(read=False)
+
+    def filter_countries(self, text):
+        rx = lineup.wildcard(text) if text.strip() else None
+        for i in range(self.country_list.count()):
+            li = self.country_list.item(i)
+            self.country_list.setRowHidden(i, bool(rx) and not rx.search(lineup.fold(li.text())))
+
+    def show_chosen(self, read=True):
+        if read:
+            for i in range(self.country_list.count()):
+                li = self.country_list.item(i)
+                code = li.data(Qt.ItemDataRole.UserRole)
+                if li.checkState() == Qt.CheckState.Checked:
+                    self.chosen.add(code)
+                else:
+                    self.chosen.discard(code)
+        names = ", ".join(sorted(country_name(c) for c in self.chosen)) or "none yet"
+        self.chosen_label.setText(f"Chosen: {names}")
+
+    def open(self, first=False, suggest=None):
+        cfg = lineup.load_config()
+        self.chosen = set(cfg.get("countries", [])) or ({suggest} if suggest else set())
+        self.country_filter.clear()
+        self.load_countries()
+        for sid, b in self.svc.items():
+            b.setChecked(cfg.get("services", {}).get(sid, True))
+        p = (cfg.get("providers") or [{}])[0]
+        self.p_name.setText(p.get("name", ""))
+        self.p_m3u.setText(p.get("m3u", ""))
+        self.p_xml.setText(p.get("xmltv", ""))
+        self.folder.setText(cfg.get("record_dir") or lineup.DEFAULTS["record_dir"])
+        self.head.setText("Welcome to Watch TV: which countries?" if first else "Watch TV settings")
+        self.status.setText("Pick the countries whose channels you'd like, then press Save." if first else "")
+        self.setGeometry(self.tv.rect())
+        self.show()
+        self.raise_()
+        self.country_filter.setFocus()
+
+    def pick_folder(self):
+        d = QFileDialog.getExistingDirectory(self, "Where should recordings go?", self.folder.text())
+        if d:
+            self.folder.setText(d)
+
+    def save(self):
+        cfg = lineup.load_config()
+        cfg["countries"] = sorted(self.chosen)
+        if not cfg["countries"]:
+            self.status.setText("Choose at least one country.")
+            return
+        cfg["services"] = {sid: b.isChecked() for sid, b in self.svc.items()}
+        m3u = self.p_m3u.text().strip()
+        if m3u and not m3u.startswith(("http://", "https://")):
+            self.status.setText("The playlist link should start with http:// or https://.")
+            return
+        cfg["providers"] = [{"name": self.p_name.text().strip() or "My provider", "m3u": m3u,
+                             "xmltv": self.p_xml.text().strip()}] if m3u else []
+        cfg["record_dir"] = self.folder.text()
+        lineup.save_config(cfg)
+        self.close_panel()
+        self.tv.rebuild()
+
+
+# ---- the TV ---------------------------------------------------------------------------------
+class TV(QWidget):
+    built = Signal(object, object)
+    guide_ready = Signal()
+
+    def __init__(self, windowed=False):
+        super().__init__()
+        self.setWindowTitle(TITLE)
+        self.setWindowIcon(QIcon.fromTheme("tv"))
+        self.setStyleSheet("TV { background: black; }")
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        from mpvwidget import MpvWidget
+        self.video = MpvWidget(self)
+        self.video.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.video.playing.connect(self.tuned)
+        self.video.ended.connect(self.stream_ended)
+        self.info = InfoBar(self)
+        self.info.hide()
+        self.msg = big(QLabel(self), 1.6, True)
+        self.msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.msg.setStyleSheet(f"background: {BG}; color: white; border-radius: 16px; padding: 18px 30px;")
+        self.msg.hide()
+        self.numbox = big(QLabel(self), 3.0, True)
+        self.numbox.setStyleSheet(f"background: {BG}; color: white; border-radius: 14px; padding: 6px 22px;")
+        self.numbox.hide()
+        self.guide = Guide(self)
+        self.guide.hide()
+        self.guide.watch.connect(self.watch_from_guide)
+        self.guide.options.connect(self.record_options)
+        self.recordings = Recordings(self)
+        self.recordings.hide()
+        self.search = Search(self)
+        self.search.hide()
+        self.settings = Settings(self)
+        self.settings.hide()
+        self.info_timer = QTimer(self, singleShot=True, interval=6000, timeout=self.info.hide)
+        self.msg_timer = QTimer(self, singleShot=True, timeout=self.msg.hide)
+        self.num_timer = QTimer(self, singleShot=True, interval=2200, timeout=self.commit_number)
+        self.tune_timer = QTimer(self, singleShot=True, interval=TUNE_TIMEOUT, timeout=self.tune_failed)
+        self.back_armed = 0
+        self.typed = ""
+        self.lu = lineup.load_saved()
+        self.db = guide.connect()
+        self.favs = set(jload(FAVS, []))
+        st = jload(STATE, {})
+        self.recent = st.get("recent", [])
+        self.last_key = st.get("last")
+        self.prev_key = st.get("prev")
+        self.zap = []
+        self.zap_shelf = None
+        self.channel = None
+        self.stream_i = 0
+        self.file_mode = False
+        self.broken = {k: t for k, t in jload(BROKEN, {}).items() if time.time() - t < 86400}
+        self.built.connect(self.on_built)
+        self.guide_ready.connect(lambda: (self.guide.cache.clear(), self.guide.update(), self.refresh_info()))
+        if windowed:
+            self.resize(1280, 720)
+            self.show()
+        else:
+            self.showFullScreen()
+        cfg_exists = os.path.exists(lineup.CONFIG)
+        if not cfg_exists:
+            self.first_run()
+        elif not self.lu or time.time() - getattr(self.lu, "made", 0) > 24 * 3600:
+            self.rebuild(quiet=bool(self.lu))
+            if self.lu:
+                self.start_watching()
+        else:
+            self.start_watching()
+            self.refresh_guide()
+
+    # layout ---------------------------------------------------------------------------------
+    def resizeEvent(self, _e):
+        r = self.rect()
+        self.video.setGeometry(r)
+        w = min(r.width() - 80, 1500)
+        self.info.setGeometry((r.width() - w) // 2, r.height() - 300, w, 260)
+        self.guide.setGeometry(r)
+        for p in (self.recordings, self.settings, self.search):
+            if p.isVisible():
+                p.setGeometry(r)
+        self.numbox.adjustSize()
+        self.numbox.move(r.width() - self.numbox.width() - 60, 50)
+
+    def say(self, text, ms=4000):
+        self.msg.setText(text)
+        self.msg.adjustSize()
+        self.msg.move((self.width() - self.msg.width()) // 2, (self.height() - self.msg.height()) // 2)
+        self.msg.show()
+        self.msg.raise_()
+        if ms:
+            self.msg_timer.start(ms)
+        else:
+            self.msg_timer.stop()
+
+    # channels -------------------------------------------------------------------------------
+    def first_run(self):
+        from PySide6.QtCore import QLocale
+        cc = QLocale.system().name().split("_")[-1].upper()
+        # A suggestion only: nothing is saved until they press Save.
+        self.settings.open(first=True, suggest=cc if len(cc) == 2 and cc.isalpha() else "US")
+
+    def rebuild(self, quiet=False):
+        if not quiet:
+            self.say("Getting the channels ready… (the first time takes a minute)", 0)
+
+        def work():
+            try:
+                lu = lineup.Lineup(log=lambda *a: None).build()
+                lineup.save_lineup(lu)
+                lu.made = time.time()
+                self.built.emit(lu, None)
+            except Exception as e:                    # noqa: BLE001
+                self.built.emit(None, str(e))
+        threading.Thread(target=work, daemon=True).start()
+
+    def on_built(self, lu, err):
+        if lu is None:
+            self.say(f"Couldn't get the channels: {err}. Is the internet connected?", 8000)
+            return
+        had = self.lu is not None and self.channel is not None
+        self.lu = lu
+        self.msg.hide()
+        if lu.errors:
+            self.say("Some channel lists couldn't be loaded:\n" + "\n".join(lu.errors[:4]), 6000)
+        if not had:
+            self.start_watching()
+        self.refresh_guide(force=True)
+
+    def refresh_guide(self, force=False):
+        lu = self.lu
+
+        def work():
+            try:
+                guide.refresh(lu, force=force, log=lambda *a: None)
+            except Exception:                         # noqa: BLE001 - no guide is better than no TV
+                pass
+            self.guide_ready.emit()
+        threading.Thread(target=work, daemon=True).start()
+
+    def start_watching(self):
+        if not self.lu or not self.lu.channels:
+            self.say("No channels yet. Press M for settings.", 0)
+            return
+        c = self.lu.by_key.get(self.last_key) or self.lu.channels[0]
+        self.zap_shelf = {"country": c["country"]}
+        self.zap = self.lu.pick(c["country"])
+        self.tune(c)
+
+    def shelf_label(self):
+        f = self.zap_shelf or {}
+        if f.get("fav"):
+            return "Favourites"
+        if f.get("recent"):
+            return "Recently watched"
+        if f.get("found"):
+            return f"Search: {f['found']}"
+        if f.get("sub"):
+            return f"{lineup.TOPIC_NAMES.get(f.get('topic'), '')} › {f['sub']}"
+        if f.get("topic"):
+            return lineup.TOPIC_NAMES.get(f["topic"], "")
+        return "All channels"
+
+    def tune(self, c, stream_i=0):
+        self.file_mode = False
+        if self.channel and self.channel["key"] != c["key"]:
+            self.prev_key = self.channel["key"]
+        self.channel = c
+        self.stream_i = stream_i
+        s = c["streams"][stream_i]
+        self.video.play(s["url"], s.get("ua"), s.get("ref"))
+        self.tune_timer.start()
+        if stream_i == 0:
+            self.say(f"{c['number']}  {c['name']}", 0)
+            self.recent = [c["key"]] + [k for k in self.recent if k != c["key"]][:29]
+            jsave(STATE, {"recent": self.recent, "last": c["key"], "prev": self.prev_key})
+        self.refresh_info(show=True)
+
+    def tuned(self):
+        self.tune_timer.stop()
+        if not self.file_mode and self.channel:
+            self.broken.pop(self.channel["key"], None)
+        self.msg.hide()
+
+    def stream_ended(self, error):
+        if self.file_mode:
+            if not error:
+                self.say("That's the end of the recording. Back to TV…", 2500)
+                QTimer.singleShot(2500, self.back_to_live)
+            return
+        self.tune_failed()
+
+    def tune_failed(self):
+        self.tune_timer.stop()
+        c = self.channel
+        if not c or self.file_mode:
+            return
+        if self.stream_i + 1 < len(c["streams"]):
+            self.tune(c, self.stream_i + 1)          # try the backup stream
+            return
+        self.broken[c["key"]] = time.time()
+        jsave(BROKEN, self.broken)
+        self.say(f"{c['number']}  {c['name']}\nThis channel isn't working right now. Try another one.", 6000)
+
+    def is_broken(self, c):
+        return c["key"] in self.broken
+
+    def step(self, d):
+        if not self.zap or not self.channel:
+            return
+        keys = [c["key"] for c in self.zap]
+        i = keys.index(self.channel["key"]) if self.channel["key"] in keys else -1
+        for _ in range(len(self.zap)):
+            i = (i + d) % len(self.zap)
+            if not self.is_broken(self.zap[i]):      # skip channels that just failed
+                break
+        self.tune(self.zap[i])
+
+    def watch_from_guide(self, c, rows):
+        f = self.guide.shelves[self.guide.shelf][1]
+        self.zap_shelf = f
+        self.zap = list(rows)
+        self.guide.hide()
+        self.setFocus()
+        self.tune(c)
+
+    def toggle_fav(self, c):
+        if c["key"] in self.favs:
+            self.favs.discard(c["key"])
+            self.say(f"{c['name']} is no longer a favourite", 2000)
+        else:
+            self.favs.add(c["key"])
+            self.say(f"★ {c['name']} added to Favourites", 2000)
+        jsave(FAVS, sorted(self.favs))
+        self.guide.update()
+        self.refresh_info()
+
+    # number keys ----------------------------------------------------------------------------
+    def digit(self, d):
+        self.typed = (self.typed + d)[-5:]
+        self.numbox.setText(self.typed)
+        self.numbox.adjustSize()
+        self.numbox.move(self.width() - self.numbox.width() - 60, 50)
+        self.numbox.show()
+        self.numbox.raise_()
+        self.num_timer.start()
+
+    def commit_number(self):
+        self.numbox.hide()
+        n, self.typed = self.typed, ""
+        if not n or not self.lu:
+            return
+        country = self.channel["country"] if self.channel else None
+        if self.guide.isVisible():
+            country = self.guide.country
+        hit = next((c for c in self.lu.channels if c["country"] == country and str(c["number"]) == n), None)
+        if not hit:
+            self.say(f"There's no channel {n}", 2000)
+            return
+        if self.guide.isVisible():
+            self.guide.hide()
+        self.zap_shelf = {"country": hit["country"]}
+        self.zap = self.lu.pick(hit["country"])
+        self.tune(hit)
+
+    # info and recording ---------------------------------------------------------------------
+    def scheduled_keys(self):
+        """{(channel key, programme start)} of everything that will be (or is being) recorded. A
+        recording that starts late (recorded from the middle) still marks its programme."""
+        out = set()
+        for it in recorder.load_schedule()["items"]:
+            if not it.get("cancelled"):
+                for p in guide.window(self.db, [it["key"]], it["start"], it["start"] + 1)[it["key"]]:
+                    out.add((it["key"], p["start"]))
+                out.add((it["key"], it["start"]))
+        return out
+
+    def recording_now(self, c):
+        st = recorder.load_status()
+        return any(it["key"] == c["key"] and recorder.state_of(it, st) == "recording"
+                   for it in recorder.load_schedule()["items"])
+
+    def refresh_info(self, show=False):
+        if not self.channel or self.file_mode:
+            return
+        progs = guide.now_next(self.db, self.channel["key"])
+        self.info.show_for(self.channel, progs, self.shelf_label(), self.recording_now(self.channel),
+                           self.channel["key"] in self.favs)
+        if show:
+            self.info.show()
+            self.info.raise_()
+            self.info_timer.start()
+
+    def record_options(self, c, prog):
+        m = tv_menu(self)
+        now = time.time()
+        if prog is None:
+            m.addAction("Record this channel for an hour", lambda: self.record(c, None))
+        else:
+            title = prog["title"]
+            started = prog["start"] <= now
+            m.addAction(("Record the rest of " if started else "Record ") + f"“{title}”", lambda: self.record(c, prog))
+            m.addAction(f"Record every episode of “{title}”", lambda: self.record(c, prog, every=True))
+            if not started:
+                m.addAction("Watch this channel now", lambda: self.watch_from_guide(c, self.guide.rows or [c]))
+        sched = [it for it in recorder.load_schedule()["items"] if it["key"] == c["key"] and not it.get("cancelled")
+                 and prog and abs(it["start"] - prog["start"]) < 120]
+        for it in sched:
+            m.addAction("Don't record it", lambda it=it: (recorder.cancel(it["id"]), self.say("Okay, it won't be recorded.", 2500),
+                                                           self.guide.update()))
+        m.adjustSize()
+        show_menu(m, self.mapToGlobal(QPoint((self.width() - m.width()) // 2, (self.height() - m.height()) // 2)))
+
+    def record(self, c, prog, every=False):
+        now = time.time()
+        if prog is None:
+            recorder.add(c, c["name"], now, now + 3600)
+            self.say(f"● Recording {c['name']} for an hour", 3000)
+        else:
+            recorder.add(c, prog["title"], max(now, prog["start"]), prog["stop"], prog.get("sub", ""))
+            if every:
+                recorder.add_rule(c, prog["title"])
+                self.say(f"● Every episode of “{prog['title']}” on {c['name']} will be recorded", 3500)
+            else:
+                when = "now" if prog["start"] <= now else f"at {clock(prog['start'])}"
+                self.say(f"● “{prog['title']}” will be recorded {when}", 3000)
+        self.ensure_recorder()
+        self.guide.update()
+        QTimer.singleShot(8000, self.refresh_info)
+
+    def ensure_recorder(self):
+        import subprocess
+        subprocess.Popen(["systemctl", "--user", "start", "kantanos-tv-recorder.service"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # recordings playback --------------------------------------------------------------------
+    def play_file(self, files, it):
+        self.file_mode = True
+        self.tune_timer.stop()
+        self.info.hide()
+        self.video.command("loadfile", files[0], "replace")
+        for f in files[1:]:
+            self.video.command("loadfile", f, "append")
+        self.say(f"{it['title']}\nSpace: pause · ← →: back / forward · Esc: back to TV", 4000)
+
+    def back_to_live(self):
+        self.file_mode = False
+        if self.channel:
+            self.tune(self.channel)
+
+    # menus ----------------------------------------------------------------------------------
+    def open_search(self):
+        self.guide.hide()
+        self.info.hide()
+        self.search.open()
+
+    def watch_search(self, c, rows):
+        """Watch a channel found by searching; up/down then moves through what was found."""
+        self.zap_shelf = {"found": self.search.box.text().strip()}
+        self.zap = list(rows)
+        self.setFocus()
+        self.tune(c)
+
+    def open_menu(self):
+        self.guide.hide()
+        self.recordings.open()
+
+    def open_settings(self):
+        self.settings.open()
+
+    # keys -----------------------------------------------------------------------------------
+    def keyPressEvent(self, e):
+        k = e.key()
+        if self.file_mode:
+            if k == Qt.Key.Key_Space or k == Qt.Key.Key_MediaTogglePlayPause:
+                self.video.command("cycle", "pause")
+            elif k == Qt.Key.Key_Left:
+                self.video.command("seek", "-10")
+            elif k == Qt.Key.Key_Right:
+                self.video.command("seek", "30")
+            elif k in (Qt.Key.Key_Escape, Qt.Key.Key_Back, Qt.Key.Key_MediaStop):
+                self.back_to_live()
+            return
+        if e.text().isdigit():
+            self.digit(e.text())
+        elif k in (Qt.Key.Key_Up, Qt.Key.Key_PageUp, Qt.Key.Key_ChannelUp, Qt.Key.Key_Plus):
+            self.step(1)
+        elif k in (Qt.Key.Key_Down, Qt.Key.Key_PageDown, Qt.Key.Key_ChannelDown, Qt.Key.Key_Minus):
+            self.step(-1)
+        elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Select, Qt.Key.Key_I, Qt.Key.Key_Info):
+            if self.typed:
+                self.commit_number()
+            elif self.info.isVisible():
+                self.info.hide()
+                self.open_guide()
+            else:
+                self.refresh_info(show=True)
+        elif k in (Qt.Key.Key_Right, Qt.Key.Key_G, Qt.Key.Key_Guide):
+            self.open_guide()
+        elif k in (Qt.Key.Key_M, Qt.Key.Key_Menu):
+            self.open_menu()
+        elif k in (Qt.Key.Key_Slash, Qt.Key.Key_Search, Qt.Key.Key_S):
+            self.open_search()
+        elif k in (Qt.Key.Key_Left, Qt.Key.Key_L):
+            prev = self.lu.by_key.get(self.prev_key) if self.lu and self.prev_key else None
+            if prev:
+                self.tune(prev)
+        elif k in (Qt.Key.Key_R, Qt.Key.Key_MediaRecord) and self.channel:
+            progs = guide.now_next(self.db, self.channel["key"])
+            now = progs[0] if progs and progs[0]["start"] <= time.time() else None
+            self.record_options(self.channel, now)
+        elif k == Qt.Key.Key_F and self.channel:
+            self.toggle_fav(self.channel)
+        elif k in (Qt.Key.Key_Escape, Qt.Key.Key_Back, Qt.Key.Key_Backspace):
+            if self.info.isVisible() or self.numbox.isVisible():
+                self.info.hide()
+                self.numbox.hide()
+                self.typed = ""
+            elif time.time() - self.back_armed < 3:
+                self.close()
+            else:
+                self.back_armed = time.time()
+                self.say("Press Back again to leave Watch TV", 3000)
+        elif k == Qt.Key.Key_F11:
+            self.showNormal() if self.isFullScreen() else self.showFullScreen()
+
+    def open_guide(self):
+        if not self.lu or not self.lu.channels:
+            return
+        country = self.channel["country"] if self.channel else self.lu.countries()[0]
+        self.info.hide()
+        self.guide.open(country, self.zap_shelf if self.zap_shelf and len(self.zap_shelf) > 1 else
+                        {"country": country}, self.channel)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.RightButton:
+            self.open_guide()
+        else:
+            self.refresh_info(show=True)
+
+    def mouseDoubleClickEvent(self, _e):
+        self.showNormal() if self.isFullScreen() else self.showFullScreen()
+
+    def wheelEvent(self, e):
+        self.step(1 if e.angleDelta().y() > 0 else -1)
+
+    def closeEvent(self, e):
+        jsave(STATE, {"recent": self.recent, "last": self.channel["key"] if self.channel else self.last_key,
+                      "prev": self.prev_key})
+        self.video.close_player()
+        super().closeEvent(e)
+
+
+def self_test():
+    """Draws the guide, recordings and settings with a tiny made-up lineup and guide (no network,
+    no video), and drives the guide with the keys."""
+    import sqlite3
+    import tempfile
+    tmp = tempfile.mkdtemp()
+    lineup.DATA = tmp
+    recorder.SCHEDULE, recorder.STATUS = os.path.join(tmp, "schedule.json"), os.path.join(tmp, "status.json")
+    guide.DB = os.path.join(tmp, "guide.sqlite")
+    lu = lineup.Lineup({"countries": [], "services": {}, "providers": []}, log=lambda *a: None)
+    lu.add("US", "News One", "http://127.0.0.1:9/a.m3u8", service="Free TV", topic="news")
+    lu.add("US", "Comedy Two", "http://127.0.0.1:9/b.m3u8", service="Pluto TV", topic="shows", sub="Comedy")
+    lu.add("CA", "Local Three", "http://127.0.0.1:9/c.m3u8", service="Free TV", topic="local", sub="Ontario")
+    lu.number()
+    assert [c["number"] for c in lu.channels] == [2, 100, 400], [c["number"] for c in lu.channels]
+    db = guide.connect()
+    now = int(time.time())
+    db.executemany("insert into prog values (?,?,?,?,?,?,?,?,?)",
+                   [(lu.channels[1]["key"], now - 600, now + 1200, "Evening News", "", "Today's news.", "News", "", ""),
+                    (lu.channels[1]["key"], now + 1200, now + 3000, "Weather Hour", "", "", "", "", "")])
+    db.commit()
+    assert [p["title"] for p in guide.now_next(db, lu.channels[1]["key"])] == ["Evening News", "Weather Hour"]
+    app = QApplication.instance() or QApplication(sys.argv)
+    host = QWidget()
+    host.resize(1280, 720)
+    host.lu, host.db, host.favs, host.recent = lu, db, set(), []
+    host.scheduled_keys = lambda: set()
+    host.is_broken = lambda c: False
+    host.toggle_fav = lambda c: host.favs.add(c["key"])
+    host.digit = host.open_menu = lambda *a: None
+    g = Guide(host)
+    g.resize(1280, 720)
+    picked = []
+    g.watch.connect(lambda c, rows: picked.append(c["name"]))
+    g.options.connect(lambda c, p: picked.append(p and p["title"]))
+    g.open("US", {"country": "US"}, lu.channels[1])
+    assert g.rows[g.row]["name"] == "News One"
+    g.grab()
+
+    def key(k):
+        g.keyPressEvent(__import__("PySide6.QtGui", fromlist=["QKeyEvent"]).QKeyEvent(QEvent.Type.KeyPress, k,
+                                                                                     Qt.KeyboardModifier.NoModifier))
+    key(Qt.Key.Key_Right)
+    assert g.selected_prog()["title"] == "Weather Hour"
+    key(Qt.Key.Key_Return)
+    assert picked[-1] == "Weather Hour"            # a programme that hasn't started: record options
+    key(Qt.Key.Key_Left)
+    key(Qt.Key.Key_Return)
+    assert picked[-1] == "News One"                # on now: watch it
+    key(Qt.Key.Key_Left)
+    assert g.focus_left
+    for _ in range(4):
+        key(Qt.Key.Key_Up)
+    assert g.shelves[g.shelf][1] is None           # the country chooser
+    key(Qt.Key.Key_Right)
+    assert g.country == "CA"
+    g.grab()
+    for cls in (Recordings, Settings):
+        p = cls(host)
+        p.resize(1280, 720)
+        p.grab()
+    recorder.add(lu.channels[1], "Weather Hour", now + 1200, now + 3000)
+    r = Recordings(host)
+    r.fill()
+    assert r.list.count() == 1 and "Will record" in r.list.item(0).text()
+    host.channel = lu.channels[1]
+    s = Search(host)
+    s.box.setText("*news*")
+    s.run()
+    texts = [s.list.item(i).text() for i in range(s.list.count())]
+    assert texts[0] == "Channels (1)" and "News One" in texts[1] and texts[2].startswith("Shows in the guide (1)") \
+        and "Evening News" in texts[3], texts
+    s.box.setText("weather*")
+    s.run()
+    assert s.list.count() == 2 and "Weather Hour" in s.list.item(1).text()
+    s.grab()
+    db.close()
+    sqlite3.connect(":memory:").close()
+    print("tv self-test ok")
+
+
+def main():
+    if "--self-test" in sys.argv:
+        self_test()
+        return
+    QApplication.setApplicationName("kantanos-tv")
+    QApplication.setDesktopFileName("kantanos-tv")
+    app = QApplication(sys.argv)
+    tv = TV(windowed="--window" in sys.argv)
+    tv.setFocus()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

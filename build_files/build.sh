@@ -89,6 +89,11 @@ dnf5 -y install restic rclone
 dnf5 -y install orca python3-icalendar python3-dateutil
 python3 -c "import icalendar, dateutil.rrule"
 
+# Watch TV: libmpv draws the picture inside the TV app; ffmpeg (already in Bazzite) records.
+dnf5 -y install mpv-libs
+# The recorder runs for everyone who signs in, idle until something is due.
+systemctl --global enable kantanos-tv-recorder.service
+
 # Virus scanning: ClamAV, its list of known viruses kept up to date in the background, and
 # "Scan for viruses" in Files (/usr/libexec/kantanos/virus-scan).
 dnf5 -y install clamav clamav-update

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Watch TV
+Name[ja]=テレビを見る
+Comment=Live TV by country, with a guide and recordings
+Keywords=tv;television;iptv;live;channels;guide;epg;pvr;record;pluto;
+Exec=/usr/libexec/kantanos/tv
+Icon=tv
+Categories=AudioVideo;Video;TV;Player;
+StartupWMClass=kantanos-tv

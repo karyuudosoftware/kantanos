@@ -60,7 +60,12 @@ the Windows VM install, cloud backups) whenever the owner is at the PC.
 
 ## Entertainment and games
 
-- [ ] **Watch TV:** a custom TV app built from the family's own TV projects (no Kodi).
+- [x] **Watch TV:** a custom TV app built from the family's own TV projects (no Kodi). Free
+      channels from any of 180 countries (iptv-org, plus Pluto TV and Plex with full guides),
+      each country numbered like a cable box and sorted into shelves (local, news, sport, movie
+      and show genres, "one show all day", networks, languages). Guide for 3 days, wildcard
+      search for channels and shows, favourites, the family's own M3U/XMLTV provider, and
+      recordings (one show or every episode) by a background service that keeps the PC awake.
 - [~] **Game Mode:** Welcome → Games installs Heroic (Epic, GOG, Amazon → "Add to Steam") and points to Lutris for EA/Ubisoft; automatic library sync still to do.
 - [ ] **Retro Games:** RetroDECK set up as a LaunchBox replacement, emulator library on the
       NAS (NFS rather than iSCSI).

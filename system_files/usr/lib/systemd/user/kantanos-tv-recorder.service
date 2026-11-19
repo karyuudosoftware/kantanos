@@ -1,0 +1,13 @@
+[Unit]
+Description=Watch TV: records programmes at their times
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /usr/share/kantanos/tv/recorder.py
+WorkingDirectory=/usr/share/kantanos/tv
+Restart=on-failure
+RestartSec=10
+Nice=5
+
+[Install]
+WantedBy=default.target
