@@ -1,0 +1,633 @@
+#!/usr/bin/python3
+"""KantanOS Picture helper: the AI on this PC looks at pictures for you.
+
+  kantan-pictures              the window (Describe a picture, Find photos)
+  kantan-pictures FILE         describe this picture (Files: right-click → Describe this picture)
+  kantan-pictures --self-test
+
+Describe: says what's in a picture in plain words (people, place, colours, any writing),
+reads it aloud, and answers questions about it ("what does the sign say?").
+Find photos: looks through a photo folder once (only with the AI on this PC, so photos never
+leave it) and keeps a short description of each in ~/.local/share/kantanos/pictures/photos.db;
+then "beach", "birthday cake" or "dog in the snow" finds them. People are never named or
+recognised here.
+"""
+import os
+import re
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+sys.path.insert(0, os.environ.get("KANTAN_AI_DIR", "/usr/share/kantanos/ai"))
+import kantanai  # noqa: E402
+
+TITLE = "Picture helper"
+DATA = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "kantanos", "pictures")
+DB = os.path.join(DATA, "photos.db")
+PHOTO_TYPES = (".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff")
+OPEN_FILTER = "Pictures (*.jpg *.jpeg *.png *.webp *.bmp *.gif *.tif *.tiff);;All files (*)"
+SEND_SIZE = 1024            # the longest side sent to the AI: plenty to see, quick to look at
+
+
+# ---- getting a picture ready for the AI -------------------------------------------------------
+def picture_bytes(path, size=SEND_SIZE):
+    """The picture as a JPEG, turned the right way up (camera orientation) and made smaller."""
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QSize, Qt
+    from PySide6.QtGui import QImageReader
+    r = QImageReader(path)
+    r.setAutoTransform(True)
+    s = r.size()
+    if s.isValid() and max(s.width(), s.height()) > size:
+        s.scale(QSize(size, size), Qt.AspectRatioMode.KeepAspectRatio)
+        r.setScaledSize(s)
+    img = r.read()
+    if img.isNull():
+        raise ValueError("This picture can't be opened.")
+    data = QByteArray()
+    buf = QBuffer(data)
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    img.convertToFormat(img.Format.Format_RGB32).save(buf, "JPEG", 88)
+    return bytes(data.data())
+
+
+# ---- what the AI is asked ---------------------------------------------------------------------
+DESCRIBE = {
+    "English": """Describe this picture for someone who can't see it well. Plain, warm, everyday words.
+Start with one sentence saying what it is. Then say who or what is in it, where it seems to be,
+what is happening, and the main colours. If there is any writing in it (signs, labels, screens,
+letters), read it out exactly. Don't guess names of people, and say nothing about anyone's
+body, weight, age or health. At most 8 sentences. Plain text, no Markdown, no lists.""",
+    "Japanese": """目の不自由な人のために、この写真を説明してください。やさしく、あたたかい日本語で。
+まず何の写真かを1文で。次に、写っている人や物、場所、何をしているか、主な色を。
+看板・ラベル・画面・手紙などの文字があれば、そのまま読み上げてください。
+人の名前を推測せず、体型・年齢・健康については何も言わないでください。8文以内。
+Markdownや箇条書きは使わないでください。""",
+}
+
+ASK = {
+    "English": """You are looking at a picture with someone who can't see it well, answering their question
+about it. Short, plain answer from what is really in the picture; say so if you can't tell.
+Never name or identify people. Plain text, no Markdown.""",
+    "Japanese": """目の不自由な人と一緒に写真を見て、その質問に答えます。写真に本当に写っていることだけを、
+短くやさしい日本語で。わからなければそう言ってください。人の名前を推測しないでください。Markdownは使わないでください。""",
+}
+
+CAPTION = """Look at this photo and describe it for a family photo search.
+Answer as JSON: {"caption": "one plain English sentence about what's in it",
+"words": ["10 to 20 search words in English: things, animals, food, place, season, weather,
+event (birthday, wedding, holiday), activity, colours"],
+"ja": ["the same search words in Japanese"]}
+Never guess names of people; say "a man", "two children", "a woman" instead."""
+
+
+def describe(cfg, image, lang="English"):
+    text = kantanai.chat(cfg, [{"role": "system", "content": DESCRIBE[lang]},
+                               {"role": "user", "content": "The picture." if lang == "English" else "写真です。"}],
+                         images=[image], temperature=0.3)
+    return tidy(text)
+
+
+def ask(cfg, image, question, history=(), lang="English"):
+    msgs = [{"role": "system", "content": ASK[lang]}]
+    for q, a in history[-4:]:
+        msgs += [{"role": "user", "content": q}, {"role": "assistant", "content": a}]
+    msgs.append({"role": "user", "content": question})
+    return tidy(kantanai.chat(cfg, msgs, images=[image], temperature=0.2))
+
+
+def tidy(text):
+    text = re.sub(r"(?s)<think>.*?</think>", "", text or "")
+    return re.sub(r"\*\*|__|^#+\s*|^\s*[-*•]\s+", "", text, flags=re.M).strip()
+
+
+def caption(cfg, image):
+    reply = kantanai.parse_json(kantanai.chat(cfg, [{"role": "system", "content": CAPTION},
+                                                    {"role": "user", "content": "The photo."}],
+                                              images=[image], json_mode=True, temperature=0.2))
+    words = [str(w).strip().lower() for w in reply.get("words", []) if str(w).strip()][:30]
+    ja = [str(w).strip() for w in reply.get("ja", []) if str(w).strip()][:30]
+    return {"caption": str(reply.get("caption") or "").strip()[:400], "words": " ".join(words + ja)}
+
+
+# ---- the photo list -------------------------------------------------------------------------------
+def connect(path=None):
+    os.makedirs(os.path.dirname(path or DB), exist_ok=True)
+    db = sqlite3.connect(path or DB, check_same_thread=False)
+    db.execute("CREATE TABLE IF NOT EXISTS photos (path TEXT PRIMARY KEY, mtime REAL, size INTEGER, "
+               "caption TEXT, words TEXT, looked REAL)")
+    return db
+
+
+def find_photos(folder):
+    out = []
+    for d, dirs, files in os.walk(folder):
+        dirs[:] = [x for x in dirs if not x.startswith(".")]
+        for n in files:
+            if n.lower().endswith(PHOTO_TYPES) and not n.startswith("."):
+                out.append(os.path.join(d, n))
+    return sorted(out)
+
+
+def to_look_at(db, photos):
+    """Photos that are new or changed since they were last looked at."""
+    known = {p: (m, s) for p, m, s in db.execute("SELECT path, mtime, size FROM photos")}
+    todo = []
+    for p in photos:
+        try:
+            st = os.stat(p)
+        except OSError:
+            continue
+        if known.get(p) != (st.st_mtime, st.st_size):
+            todo.append(p)
+    return todo
+
+
+def remember(db, path, cap):
+    st = os.stat(path)
+    db.execute("INSERT OR REPLACE INTO photos VALUES (?,?,?,?,?,?)",
+               (path, st.st_mtime, st.st_size, cap["caption"], cap["words"], time.time()))
+    db.commit()
+
+
+STOP = {"a", "an", "the", "of", "in", "on", "at", "with", "and", "or", "my", "me", "some", "photo", "photos",
+        "picture", "pictures", "show", "find", "from", "where", "is", "are", "to", "for", "this", "that", "all"}
+
+
+def word_match(w, tokens, hay):
+    """2 for the word itself, 1 for a near form (dog / dogs / doggy, run / running), else 0."""
+    if kantanai.has_japanese(w):
+        return 2 if w in hay else 0
+    if w in tokens:
+        return 2
+    stem = w[:-1] if w.endswith("s") and len(w) > 3 else w
+    for t in tokens:
+        if len(stem) >= 3 and (t.startswith(stem) or (len(t) >= 3 and stem.startswith(t))):
+            return 1
+    return 0
+
+
+def search(db, query, folder=None, limit=200):
+    """Photos whose description matches the words typed, best first: photos matching every
+    word; when none does, the photos matching the most words."""
+    words = [w for w in re.findall(r"[\w']+", query.lower()) if w not in STOP]
+    if not words:
+        return []
+    out = []
+    for path, cap, wds in db.execute("SELECT path, caption, words FROM photos"):
+        if folder and not path.startswith(os.path.join(folder, "")):
+            continue
+        hay = f"{cap} {wds}".lower()
+        tokens = re.findall(r"[\w']+", hay)
+        hits = [word_match(w, tokens, hay) for w in words]
+        n = sum(1 for h in hits if h)
+        if n:
+            out.append((n, sum(hits), path, cap))
+    if not out:
+        return []
+    best = max(n for n, *_ in out)
+    out = [x for x in out if x[0] == best]
+    out.sort(key=lambda x: (-x[1], x[2]))
+    return [(p, c) for _n, _s, p, c in out[:limit]]
+
+
+# ---- the window -----------------------------------------------------------------------------------
+def window(path=None):
+    from PySide6.QtCore import QObject, QSize, Qt, QTimer, Signal
+    from PySide6.QtGui import QFont, QIcon, QImageReader, QPixmap
+    from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+                                   QListWidget, QListWidgetItem, QMessageBox, QProgressBar, QPushButton,
+                                   QSizePolicy, QTabWidget, QTextBrowser, QVBoxLayout, QWidget)
+
+    class Bridge(QObject):
+        done = Signal(str, object, str)
+        progress = Signal(int, int, str)
+        finished = Signal()
+        read_end = Signal()
+        percent = Signal(int)
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setDesktopFileName("kantanos-pictures")
+    f = app.font()
+    f.setPointSizeF(f.pointSizeF() * 1.3)
+    app.setFont(f)
+    w = QWidget()
+    w.setWindowTitle(TITLE)
+    w.setWindowIcon(QIcon.fromTheme("image-x-generic"))
+    w.resize(1280, 860)
+    w.setFont(f)
+    outer = QVBoxLayout(w)
+    outer.setContentsMargins(24, 16, 24, 16)
+    tabs = QTabWidget()
+    outer.addWidget(tabs)
+    status = QLabel("")
+    status.setWordWrap(True)
+    outer.addWidget(status)
+    bar = QProgressBar()
+    bar.hide()
+    outer.addWidget(bar)
+    bridge = Bridge(w)
+    cfg = kantanai.settings()
+    speaker = kantanai.Speaker(cfg)
+    st = {"image": None, "path": None, "history": [], "online_ok": False, "looking": False,
+          "stop": threading.Event(), "reading": False, "said": ""}
+    ja_ui = os.environ.get("LANG", "").startswith("ja")
+
+    def btn(text, icon, slot):
+        b = QPushButton(QIcon.fromTheme(icon), text)
+        b.clicked.connect(slot)
+        b.setMinimumHeight(46)
+        b.setAccessibleName(text)
+        return b
+
+    def say(t):
+        status.setText(t)
+
+    def in_background(job, fn, *args):
+        def work():
+            try:
+                bridge.done.emit(job, fn(*args), "")
+            except Exception as e:
+                bridge.done.emit(job, None, str(e) or e.__class__.__name__)
+        threading.Thread(target=work, daemon=True).start()
+
+    def ai_ok(what="this picture"):
+        host = kantanai.online_host(cfg)
+        if host:
+            if st["online_ok"]:
+                return True
+            ok = QMessageBox.question(w, TITLE, f"Your AI is an online service ({host}). This sends {what} "
+                                      f"to {host}.\n\nSend it?")
+            st["online_ok"] = ok == QMessageBox.StandardButton.Yes
+            return st["online_ok"]
+        why = kantanai.ai_ready(cfg)
+        if why == "offline":
+            say("The AI on this PC isn't running. Try again in a minute, or ask the KantanOS Helper.")
+            return False
+        if why == "download":
+            model, size = kantanai.pick_local_model()
+            model = cfg.get("local_model") or model
+            ok = QMessageBox.question(w, TITLE, f"The AI runs on this PC and needs a one-time download ({model}, "
+                                      f"{size}). Your pictures are never sent anywhere.\n\nDownload it now?")
+            if ok == QMessageBox.StandardButton.Yes:
+                cfg["local_model"] = model
+                kantanai.save_settings({**kantanai.settings(), "local_model": model})
+                bar.show()
+                bar.setRange(0, 100)
+                say(f"Downloading the AI ({size}). This happens once.")
+                in_background("pull", kantanai.pull, model, lambda p: bridge.percent.emit(p))
+            return False
+        return True
+
+    # ---- Describe a picture ----
+    dpage = QWidget()
+    dl = QVBoxLayout(dpage)
+    drow = QHBoxLayout()
+    open_b = btn("Open a picture…", "document-open", lambda: choose())
+    lang = QComboBox()
+    lang.addItem("In English", "English")
+    lang.addItem("日本語で", "Japanese")
+    lang.setCurrentIndex(1 if ja_ui else 0)
+    lang.setMinimumHeight(46)
+    drow.addWidget(open_b)
+    drow.addWidget(lang)
+    drow.addStretch(1)
+    read_b = btn("Read aloud", "media-playback-start", lambda: toggle_read())
+    drow.addWidget(read_b)
+    dl.addLayout(drow)
+    body = QHBoxLayout()
+    pic = QLabel("Open a picture, or right-click one in Files and choose “Describe this picture”.")
+    pic.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    pic.setWordWrap(True)
+    pic.setMinimumSize(520, 420)
+    pic.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+    pic.setAccessibleName("The picture")
+    body.addWidget(pic, 5)
+    talk = QTextBrowser()
+    talk.setAccessibleName("What's in the picture")
+    tf = QFont(f)
+    tf.setPointSizeF(f.pointSizeF() * 1.1)
+    talk.setFont(tf)
+    body.addWidget(talk, 4)
+    dl.addLayout(body, 1)
+    qrow = QHBoxLayout()
+    question = QLineEdit()
+    question.setPlaceholderText("Ask about it, e.g. “What does the sign say?”")
+    question.setMinimumHeight(46)
+    question.setAccessibleName("Ask about the picture")
+    ask_b = btn("Ask", "dialog-question", lambda: do_ask())
+    question.returnPressed.connect(lambda: do_ask())
+    qrow.addWidget(question, 1)
+    qrow.addWidget(ask_b)
+    dl.addLayout(qrow)
+    tabs.addTab(dpage, QIcon.fromTheme("view-preview"), "Describe a picture")
+
+    def show_pic():
+        if st["path"]:
+            r = QImageReader(st["path"])
+            r.setAutoTransform(True)
+            img = r.read()
+            if not img.isNull():
+                pic.setPixmap(QPixmap.fromImage(img).scaled(pic.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                                                            Qt.TransformationMode.SmoothTransformation))
+
+    def choose():
+        p, _ = QFileDialog.getOpenFileName(w, "Open a picture", os.path.expanduser("~/Pictures"), OPEN_FILTER)
+        if p:
+            describe_file(p)
+
+    def describe_file(p):
+        stop_reading()
+        tabs.setCurrentWidget(dpage)
+        st.update(path=p, history=[], image=None)
+        w.setWindowTitle(f"{os.path.basename(p)} – {TITLE}")
+        show_pic()
+        talk.clear()
+        try:
+            st["image"] = picture_bytes(p)
+        except ValueError as e:
+            return say(str(e))
+        if ai_ok():
+            say("Looking at the picture…")
+            for b in (open_b, ask_b):
+                b.setEnabled(False)
+            in_background("describe", describe, cfg, st["image"], lang.currentData())
+
+    def do_ask():
+        q = question.text().strip()
+        if not q or st["image"] is None:
+            return say("Open a picture first." if st["image"] is None else "")
+        if ai_ok():
+            question.clear()
+            talk.append(f"<p><b>{'You' if lang.currentData() == 'English' else 'あなた'}:</b> {q}</p>")
+            st["asking"] = q
+            ask_b.setEnabled(False)
+            say("Looking again…")
+            in_background("ask", ask, cfg, st["image"], q, list(st["history"]), lang.currentData())
+
+    # ---- Find photos ----
+    fpage = QWidget()
+    fl = QVBoxLayout(fpage)
+    folder = {"path": os.path.expanduser("~/Pictures")}
+    frow = QHBoxLayout()
+    folder_l = QLabel("")
+    folder_b = btn("Change folder…", "folder-open", lambda: pick_folder())
+    look_b = btn("Look at my photos", "media-playback-start", lambda: toggle_look())
+    frow.addWidget(folder_l, 1)
+    frow.addWidget(folder_b)
+    frow.addWidget(look_b)
+    fl.addLayout(frow)
+    srow = QHBoxLayout()
+    query = QLineEdit()
+    query.setPlaceholderText("What are you looking for? e.g. beach, birthday cake, dog in the snow")
+    query.setMinimumHeight(46)
+    query.setAccessibleName("Search the photos")
+    srow.addWidget(query, 1)
+    srow.addWidget(btn("Find", "edit-find", lambda: do_search()))
+    query.returnPressed.connect(lambda: do_search())
+    fl.addLayout(srow)
+    results = QListWidget()
+    results.setViewMode(QListWidget.ViewMode.IconMode)
+    results.setIconSize(QSize(220, 220))
+    results.setGridSize(QSize(250, 280))
+    results.setResizeMode(QListWidget.ResizeMode.Adjust)
+    results.setWordWrap(True)
+    results.setMovement(QListWidget.Movement.Static)
+    results.setAccessibleName("Photos found")
+    fl.addWidget(results, 1)
+    hint = QLabel("Double-click a photo to open it. Right-click it to have it described.")
+    hint.setStyleSheet("color: gray")
+    fl.addWidget(hint)
+    tabs.addTab(fpage, QIcon.fromTheme("edit-find"), "Find photos")
+    db = connect()
+
+    def count_text():
+        photos = find_photos(folder["path"]) if os.path.isdir(folder["path"]) else []
+        left = len(to_look_at(db, photos))
+        folder_l.setText(f"<b>{folder['path'].replace(os.path.expanduser('~'), 'Home')}</b>: {len(photos)} photos"
+                         + (f", {left} not looked at yet" if left else ", all looked at"))
+        return photos, left
+
+    def pick_folder():
+        p = QFileDialog.getExistingDirectory(w, "Which folder of photos?", folder["path"])
+        if p:
+            folder["path"] = p
+            count_text()
+
+    def toggle_look():
+        if st["looking"]:
+            st["stop"].set()
+            look_b.setText("Stopping…")
+            return
+        if kantanai.online_host(cfg):
+            return say("Looking through all your photos only works with the AI on this PC, so your photos never "
+                       "leave it. (The KantanOS Helper's AI settings choose which AI is used.)")
+        if not ai_ok():
+            return
+        photos, left = count_text()
+        todo = to_look_at(db, photos)
+        if not todo:
+            return say("All the photos in this folder have been looked at. Type what you're looking for.")
+        st["looking"] = True
+        st["stop"] = stop = threading.Event()
+        look_b.setText("Pause")
+        look_b.setIcon(QIcon.fromTheme("media-playback-pause"))
+        bar.show()
+        bar.setRange(0, len(todo))
+
+        def work():
+            t0 = time.time()
+            for i, p in enumerate(todo):
+                if stop.is_set():
+                    break
+                try:
+                    remember(db, p, caption(cfg, picture_bytes(p)))
+                except Exception as e:          # an odd file is skipped, the rest carry on
+                    print(f"skipped {p}: {e}", file=sys.stderr)
+                each = (time.time() - t0) / (i + 1)
+                bridge.progress.emit(i + 1, len(todo), f"about {max(1, round(each * (len(todo) - i - 1) / 60))} "
+                                                       f"min to go")
+            bridge.finished.emit()
+        threading.Thread(target=work, daemon=True).start()
+
+    def on_progress(n, total, eta):
+        bar.setValue(n)
+        say(f"Looking at your photos: {n} of {total} ({eta}). You can search already, and pause any time.")
+
+    def on_looked():
+        st["looking"] = False
+        look_b.setText("Look at my photos")
+        look_b.setIcon(QIcon.fromTheme("media-playback-start"))
+        bar.hide()
+        _p, left = count_text()
+        say("Paused. Press “Look at my photos” to carry on." if left else "Done: every photo has been looked at.")
+
+    def do_search():
+        results.clear()
+        found = search(db, query.text(), folder["path"])
+        for p, cap in found:
+            r = QImageReader(p)
+            r.setAutoTransform(True)
+            s = r.size()
+            if s.isValid():
+                s.scale(QSize(220, 220), Qt.AspectRatioMode.KeepAspectRatio)
+                r.setScaledSize(s)
+            it = QListWidgetItem(QIcon(QPixmap.fromImage(r.read())), os.path.basename(p))
+            it.setToolTip(cap)
+            it.setData(Qt.ItemDataRole.UserRole, p)
+            results.addItem(it)
+        n = len(found)
+        say(f"{n} photo{'s' if n != 1 else ''} found." if n else
+            "Nothing found. Try other words, or let it look at more photos first.")
+
+    results.itemDoubleClicked.connect(lambda it: subprocess.Popen(
+        ["xdg-open", it.data(Qt.ItemDataRole.UserRole)], start_new_session=True))
+    results.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+
+    def results_menu(pos):
+        it = results.itemAt(pos)
+        if it:
+            from PySide6.QtWidgets import QMenu
+            m = QMenu(results)
+            m.addAction(QIcon.fromTheme("view-preview"), "Describe this picture",
+                        lambda: describe_file(it.data(Qt.ItemDataRole.UserRole)))
+            m.addAction(QIcon.fromTheme("document-open"), "Open",
+                        lambda: subprocess.Popen(["xdg-open", it.data(Qt.ItemDataRole.UserRole)],
+                                                          start_new_session=True))
+            m.exec(results.mapToGlobal(pos))
+    results.customContextMenuRequested.connect(results_menu)
+
+    # ---- reading aloud ----
+    def toggle_read():
+        if st["reading"]:
+            return stop_reading()
+        text = st["said"]
+        if not text:
+            return say("Nothing to read yet.")
+        if kantanai.has_japanese(text) and speaker.name.startswith("en"):
+            return say("Reading Japanese aloud isn't possible yet: there's no Japanese voice on this PC.")
+        if not speaker.ready():
+            ok = QMessageBox.question(w, TITLE, "Reading aloud uses a voice on this PC that needs a one-time "
+                                      "download of about 60 MB (from the Piper voice library). Download it now?")
+            if ok == QMessageBox.StandardButton.Yes:
+                say("Downloading the voice…")
+                in_background("voice", speaker.download)
+            return
+        st["reading"] = True
+        read_b.setText("Stop reading")
+        read_b.setIcon(QIcon.fromTheme("media-playback-stop"))
+        speaker.read(text, None, bridge.read_end.emit)
+
+    def stop_reading():
+        speaker.stop()
+
+    def read_done():
+        st["reading"] = False
+        read_b.setText("Read aloud")
+        read_b.setIcon(QIcon.fromTheme("media-playback-start"))
+
+    # ---- answers ----
+    def done(job, value, error):
+        for b in (open_b, ask_b):
+            b.setEnabled(True)
+        if job == "pull":
+            bar.hide()
+            return say(f"The AI didn't download ({error})." if error else "The AI is ready. Try again.")
+        if job == "voice":
+            if error:
+                return say(f"The voice didn't download ({error}).")
+            say("")
+            return toggle_read()
+        if error:
+            return say("The AI didn't answer: " + error)
+        say("")
+        if job == "describe":
+            talk.setPlainText(value)
+            st["said"] = value
+            talk.setFocus()
+        elif job == "ask":
+            st["history"].append((st.get("asking", ""), value))
+            talk.append(f"<p>{value}</p>")
+            st["said"] = value
+        if job in ("describe", "ask") and kantanai.settings().get("pictures_read_aloud"):
+            toggle_read()
+
+    bridge.done.connect(done)
+    bridge.progress.connect(on_progress)
+    bridge.finished.connect(on_looked)
+    bridge.read_end.connect(read_done)
+    bridge.percent.connect(lambda p: bar.setValue(p))
+    w.resizeEvent = lambda ev: show_pic()
+    w.closeEvent = lambda ev: (st["stop"].set(), stop_reading(), ev.accept())
+    count_text()
+    w.show()
+    if path:
+        QTimer.singleShot(100, lambda: describe_file(path))
+    w.parts = {"tabs": tabs, "describe_file": describe_file, "search": do_search, "query": query, "results": results}
+    return app, w
+
+
+# ---- command line ---------------------------------------------------------------------------------
+def self_test():
+    assert kantanai.self_test()
+    from PySide6.QtGui import QColor, QImage
+    from PySide6.QtWidgets import QApplication
+    _a = QApplication.instance() or QApplication(sys.argv)
+    with tempfile.TemporaryDirectory() as tmp:
+        im = QImage(3000, 2000, QImage.Format.Format_RGB32)
+        im.fill(QColor("skyblue"))
+        p = os.path.join(tmp, "Holiday", "beach.jpg")
+        os.makedirs(os.path.dirname(p))
+        im.save(p)
+        jpg = picture_bytes(p)
+        back = QImage.fromData(jpg)
+        assert max(back.width(), back.height()) == SEND_SIZE and jpg[:2] == b"\xff\xd8", back.size()
+        open(os.path.join(tmp, "notes.txt"), "w").write("x")
+        os.makedirs(os.path.join(tmp, ".cache"))
+        im.save(os.path.join(tmp, ".cache", "thumb.png"))
+        im.save(os.path.join(tmp, "dog.png"))
+        photos = find_photos(tmp)
+        assert [os.path.basename(x) for x in photos] == ["beach.jpg", "dog.png"], photos
+        db = connect(os.path.join(tmp, "t.db"))
+        assert len(to_look_at(db, photos)) == 2
+        remember(db, photos[0], {"caption": "Two children building a sandcastle on a sunny beach.",
+                                 "words": "beach sand sea summer children sandcastle 海 砂浜 夏"})
+        remember(db, photos[1], {"caption": "A brown dog running in the snow.", "words": "dog snow winter 犬 雪"})
+        assert to_look_at(db, photos) == []
+        assert [os.path.basename(x) for x, _c in search(db, "beach")] == ["beach.jpg"]
+        assert [os.path.basename(x) for x, _c in search(db, "dogs in snow")] == ["dog.png"]
+        assert [os.path.basename(x) for x, _c in search(db, "雪")] == ["dog.png"]
+        assert search(db, "wedding") == [] and search(db, "the photos") == []
+        assert [os.path.basename(x) for x, _c in search(db, "dogs")] == ["dog.png"]
+        assert [os.path.basename(x) for x, _c in search(db, "children in winter")] == ["beach.jpg", "dog.png"]
+        assert search(db, "dog", folder=os.path.join(tmp, "Holiday")) == []
+    assert tidy("**Hi**\n- a cat\n# Title") == "Hi\na cat\nTitle"
+    if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+        global DB
+        DB = os.path.join(tempfile.mkdtemp(), "photos.db")
+        _app, w = window()
+        assert w.windowTitle() == TITLE and w.parts["tabs"].count() == 2
+    print("ok")
+
+
+def main():
+    args = sys.argv[1:]
+    if args[:1] == ["--self-test"]:
+        return self_test()
+    if args[:1] == ["--describe"]:
+        args = args[1:]
+    if args and args[0].startswith("-"):
+        print(__doc__)
+        sys.exit(2)
+    path = args[0] if args else None
+    if path and path.startswith("file://"):
+        from urllib.parse import unquote, urlsplit
+        path = unquote(urlsplit(path).path)
+    app, _w = window(path)
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

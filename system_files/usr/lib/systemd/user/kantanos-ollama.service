@@ -1,5 +1,5 @@
 [Unit]
-Description=KantanOS local AI (Ollama, for the KantanOS Helper)
+Description=KantanOS local AI (Ollama: the Helper, Kan-chan and the AI apps)
 Documentation=file:///usr/libexec/kantanos/helper
 
 [Service]
@@ -11,6 +11,9 @@ Environment=OLLAMA_MODELS=%h/.local/share/ollama/models
 Environment=OLLAMA_VULKAN=1
 # Unload the model after 10 idle minutes so games get the video memory back
 Environment=OLLAMA_KEEP_ALIVE=10m
+# One memory size for every app (Helper, Kan-chan, Letters and documents, Picture helper):
+# a request asking for a different size makes Ollama reload the whole model
+Environment=OLLAMA_CONTEXT_LENGTH=16384
 ExecStart=/usr/bin/ollama serve
 Restart=on-failure
 

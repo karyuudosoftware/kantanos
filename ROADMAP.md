@@ -156,7 +156,19 @@ on the real PC.*
         safe" instruction (flagged as a scam), 7 of 7 mistakes found. Weak: explaining an
         English letter in Japanese (12B sometimes muddles it). Japanese can't be read aloud yet
         (no Japanese Piper voice).
-  - [ ] Describe photos (what's in a picture, read aloud; find photos by what's in them).
+  - [x] **Picture helper** (`kantan-pictures`, Welcome, app menu, right-click a picture in Files →
+        "Describe this picture"). Describe: what's in it in plain words (people without names,
+        place, what's happening, colours, any writing read out), English or Japanese, Read
+        aloud, and questions about it ("Is it still snowing?"). Find photos: "Look at my photos"
+        goes through a folder once (pause any time, carries on later; only with the AI on this
+        PC), keeping a sentence and search words (English and Japanese) per photo in
+        `~/.local/share/kantanos/pictures/photos.db`; then "dog in the snow", "dogs", "犬" or
+        "family outdoors" find them (closest matches when nothing has every word). About 3 s
+        per photo on the 4080 once the model is loaded. Tested with Gemma 3 12B on real photos
+        and in the VM end to end. Weak: reading signs in other alphabets (an Azerbaijani street
+        sign came out garbled).
+        All the AI apps now ask Ollama for one memory size (16384, also its default in
+        `kantanos-ollama.service`): a different size made it reload the whole model each time.
   - [ ] Recipe book (save from typing, a website or a photo of a cookbook page; scale
         servings; big step-by-step cooking view).
   - [ ] Make pictures from words and fix photos (remove things, tidy old photos) on the PC.

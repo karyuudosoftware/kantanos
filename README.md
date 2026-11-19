@@ -105,6 +105,8 @@ A USB 2 stick is too slow for this OS; use USB 3 or, better, an SSD.
 - Letters and documents (`kantan-docs`; shared AI and voice code for the everyday AI apps in
   `/usr/share/kantanos/ai/kantanai.py`, using the Helper's AI settings): explain a letter in
   plain words, check your writing, read aloud. Scans and photos are read with tesseract.
+- Picture helper (`kantan-pictures`): describes a picture in words (read aloud, questions about
+  it) and finds photos by what's in them after looking through a folder once, all on this PC.
 - Smart home (`kantan-home`, "Smart home" in the app menu and Welcome): the house temperature
   in the top bar (widget `org.kantanos.home`), click to change it or switch the heating on/off.
   Talks to Home Assistant (already in the home, found by zeroconf, or run on this PC as the

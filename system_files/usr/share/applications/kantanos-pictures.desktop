@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Picture helper
+Name[ja]=写真ヘルパー
+Comment=Describe a picture in words, read it aloud, find photos by what's in them
+Exec=kantan-pictures %f
+Icon=image-x-generic
+Categories=Graphics;Utility;
+Keywords=describe;photo;picture;find;search;blind;read aloud;

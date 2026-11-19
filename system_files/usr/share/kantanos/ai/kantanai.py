@@ -137,7 +137,12 @@ def ai_ready(cfg):
 
 
 # ---- asking -----------------------------------------------------------------------------------
-def chat(cfg, messages, json_mode=False, images=(), context=16384, temperature=0.3, timeout=900):
+# One memory size for every KantanOS AI app: Ollama reloads the whole model whenever a request
+# asks for a different size, which costs seconds to minutes each time.
+CONTEXT = 16384
+
+
+def chat(cfg, messages, json_mode=False, images=(), context=CONTEXT, temperature=0.3, timeout=900):
     """Ask the AI. images: picture files or bytes, attached to the last message."""
     pics = []
     for im in images:

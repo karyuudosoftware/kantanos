@@ -154,6 +154,8 @@ doc += screen("Tools", "Disk space and system helpers", "".join([
            "nohup setsid /usr/libexec/kantanos/kanchan --enable >&/dev/null"),
     action("docs", "Letters and documents", "Open a letter, bill or form (PDF, scan or photo) and get it in plain words: what it says, what you need to do and by when, and anything that looks like a scam. Checks your own writing too, and reads anything aloud. The AI runs on this PC.",
            "nohup setsid kantan-docs >&/dev/null"),
+    action("pictures", "Picture helper", "Hear what's in a picture: the AI on this PC describes it in plain words (people, place, colours, any writing) and answers questions about it. It can also look through your photos once, so typing \"beach\" or \"birthday cake\" finds them. Photos never leave this PC.",
+           "nohup setsid kantan-pictures >&/dev/null"),
     action("access", "Make the PC easier to see and hear", "Screen reader (reads the screen out loud), everything bigger, bigger text and mouse pointer, a magnifier. Kan-chan can also read your email out loud and remind you about appointments.",
            "nohup setsid /usr/libexec/kantanos/accessibility >&/dev/null"),
     action("claudecode", "Install Claude Code", "Claude's coding assistant for the terminal, from Anthropic's official installer. Needs a Claude account. It goes into your home folder, so updates to KantanOS don't affect it.",
