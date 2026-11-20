@@ -15,6 +15,7 @@ own. The system report is treated as data: instructions inside logs are ignored,
 if a model were fooled it could only suggest one of these repairs, which the user approves.
 """
 import json
+import glob
 import os
 import re
 import shutil
@@ -387,29 +388,30 @@ def local_ready(model):
 def character_dir(name):
     for base in CHARACTERS:            # a pack in the home folder wins over the built-in one
         d = os.path.join(base, name)
-        if os.path.isfile(os.path.join(d, "idle.svg")) or os.path.isfile(os.path.join(d, "idle.png")):
+        if (os.path.isfile(os.path.join(d, "idle.svg")) or os.path.isfile(os.path.join(d, "idle.png"))
+                or glob.glob(os.path.join(d, "looks", "*", "idle.png"))):
             return d
     return None
 
 
+sys.path.insert(0, "/usr/share/kantanos/helper")
+import looks  # noqa: E402  (which outfit the character wears now: looks/<name>, when.json)
+
+
 class Avatar(QWidget):
     """Draws the character pack's frames: idle (gently bobbing, blinking), think, happy,
-    worried, and talk1/talk2 while speaking. A pack is a folder of SVG or PNG files."""
+    worried, and talk1/talk2 while speaking. A pack is a folder of SVG or PNG files, or
+    several outfits in looks/<name>/ worn by season, time of day and weather (looks.py),
+    rechecked every 10 minutes."""
 
-    def __init__(self, pack):
+    def __init__(self, pack, context=""):
         super().__init__()
         self.setFixedSize(132, 165)
+        self.pack, self.context, self.look = pack, context, None
         self.frames = {}
-        for name in ("idle", "blink", "talk1", "talk2", "think", "happy", "worried", "listen"):
-            for ext in (".svg", ".png"):
-                p = os.path.join(pack, name + ext) if pack else ""
-                if p and os.path.isfile(p):
-                    if ext == ".svg":
-                        self.frames[name] = QSvgRenderer(p)
-                    else:
-                        from PySide6.QtGui import QPixmap
-                        self.frames[name] = QPixmap(p)
-                    break
+        self.load_look()
+        self.look_timer = QTimer(self, interval=10 * 60 * 1000, timeout=self.load_look)
+        self.look_timer.start()
         self.mood = "idle"
         self.mouth = None                 # "talk1" / "talk2" while speaking
         self.blinking = False
@@ -418,6 +420,24 @@ class Avatar(QWidget):
         self.tick.start()
         self.blink_timer = QTimer(self, singleShot=True, timeout=self.blink)
         self.blink_timer.start(2500)
+
+    def load_look(self):
+        folder = looks.current(self.pack, self.context) if self.pack else None
+        if folder == self.look and self.frames:
+            return
+        self.look, frames = folder, {}
+        for name in ("idle", "blink", "talk1", "talk2", "think", "happy", "worried", "listen"):
+            for ext in (".svg", ".png"):
+                p = os.path.join(folder, name + ext) if folder else ""
+                if p and os.path.isfile(p):
+                    if ext == ".svg":
+                        frames[name] = QSvgRenderer(p)
+                    else:
+                        from PySide6.QtGui import QPixmap
+                        frames[name] = QPixmap(p)
+                    break
+        self.frames = frames
+        self.update()
 
     def blink(self):
         self.blinking = True
@@ -441,6 +461,7 @@ class Avatar(QWidget):
         bob = math.sin((time.monotonic() - self.t0) * speed) * 2.5 if self.mood in ("idle", "think", "listen") else 0
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)          # drawn pictures scale smoothly
         target = QRectF(0, 3 + bob, self.width(), self.height() - 6)
         if isinstance(frame, QSvgRenderer):
             frame.render(p, target)
@@ -657,7 +678,7 @@ class Helper(QWidget):
         self.char_name = info.get("name", "Helper")
         self.greeting = info.get("greeting", "")
         self.voice = Voice(self.cfg.get("voice") or info.get("voice", "en_US-hfc_female-medium"))
-        self.avatar = Avatar(pack) if pack else None
+        self.avatar = Avatar(pack, "helper") if pack else None
         top = QHBoxLayout()
         top.setSpacing(16)
         if self.avatar:

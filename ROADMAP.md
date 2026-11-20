@@ -331,6 +331,21 @@ Steps:
       slips even-handed (both parties explained alike). Tested in the VM (Pochi). Not tested:
       own picture, "Hear it" (no sound in the VM).
 
+- [~] **Kan-chan's new look** (2D, Nov 2026): the owner's own design (pen sketches, finished with
+      Gemini into a model sheet with expressions and outfits for days, seasons and the night).
+      Outfits live in `characters/kan-chan/looks/<name>/` and `when.json` picks one: doctor while
+      the Helper is fixing something, the raincoat when it's raining (Open-Meteo for the Weather
+      widget's town, checked every 30 min), winter coat in snow, pyjamas 22:00-06:00, then
+      summer / spring / autumn / winter, the hoodie at weekends, else everyday
+      (`/usr/share/kantanos/helper/looks.py`). Outfits not drawn yet are skipped.
+      Frames: `tools/kanchan-art/make_pack.py` cuts the drawing out and asks the FLUX.2 picture
+      model to change only her face; blink pastes back only the eyes and talking only the mouth,
+      so nothing else flickers. Done: everyday (techwear jacket) and rain (raincoat, umbrella),
+      8 frames each, in her window, the Helper and the desktop buddy (VM-tested, rain shown by a
+      pretend rainy forecast). Still to make, from the sheets in `tools/kanchan-art/source/`:
+      pyjamas, doctor, the seasonal looks, hoodie, swimwear (the briefs version), casual
+      outfits. The old drawn SVG frames stay as the fallback and for "Make a character".
+
 - [ ] Idea, later: a "Kan-chan model". Fine-tune an open model (LoRA on Gemma/Qwen/Mistral,
       overnight on the RTX 4080) with reviewed example conversations: each side in its own
       terms, same words for every side, facts stated plainly, and how different parts of the

@@ -16,7 +16,8 @@ PlasmoidItem {
     id: root
 
     property string pack: "file:///usr/share/kantanos/helper/characters/kan-chan/"
-    property bool ownPicture: false
+    property bool ownPicture: false     // a single picture (idle.png only): no blinking or moods
+    property bool png: false            // frames are PNG drawings (outfits in looks/<name>/)
     property string frame: "idle"
     property string bubble: ""
     property string lastSaid: ""
@@ -60,7 +61,8 @@ PlasmoidItem {
             anchors.bottomMargin: sway.value
             width: parent.width
             height: parent.height - (speech.visible ? speech.height + Kirigami.Units.smallSpacing : 0)
-            source: root.ownPicture ? root.pack + "idle.png" : root.pack + root.frame + ".svg"
+            source: root.ownPicture ? root.pack + "idle.png" : root.pack + root.frame + (root.png ? ".png" : ".svg")
+            mipmap: true
             sourceSize.width: width * 2
             sourceSize.height: height * 2
             fillMode: Image.PreserveAspectFit
@@ -115,11 +117,13 @@ PlasmoidItem {
         }
     }
 
-    // which character: a made one in the home folder (Kan-chan → Make a character) or Kan-chan
+    // which character (a made one in the home folder, or Kan-chan) and which of its outfits
+    // to wear now (season, time of day, weather: /usr/share/kantanos/helper/looks.py)
     readonly property string packCmd: "c=$(sed -n 's/.*\"character\": *\"\\([^\"]*\\)\".*/\\1/p' "
-        + "\"${XDG_CONFIG_HOME:-$HOME/.config}/kantanos/helper.json\" 2>/dev/null); "
+        + "\"${XDG_CONFIG_HOME:-$HOME/.config}/kantanos/helper.json\" 2>/dev/null); [ -n \"$c\" ] || c=kan-chan; "
         + "d=\"${XDG_DATA_HOME:-$HOME/.local/share}/kantanos/helper/characters/$c\"; "
-        + "[ -n \"$c\" ] && [ \"$c\" != kan-chan ] && [ -d \"$d\" ] && echo \"$d\" && ls \"$d\"; true # buddy-pack"
+        + "[ -d \"$d\" ] || d=/usr/share/kantanos/helper/characters/$c; "
+        + "python3 /usr/share/kantanos/helper/looks.py --dir \"$d\"; true # buddy-pack"
 
     P5Support.DataSource {
         id: run
@@ -131,9 +135,11 @@ PlasmoidItem {
                 var lines = (data.stdout || "").split("\n").filter(l => l.trim() !== "")
                 if (lines.length > 0) {
                     root.pack = "file://" + lines[0] + "/"
-                    root.ownPicture = lines.indexOf("idle.png") >= 0 && lines.indexOf("idle.svg") < 0
+                    root.png = lines.indexOf("idle.png") >= 0 && lines.indexOf("idle.svg") < 0
+                    root.ownPicture = root.png && lines.indexOf("blink.png") < 0
                 } else {
                     root.pack = "file:///usr/share/kantanos/helper/characters/kan-chan/"
+                    root.png = false
                     root.ownPicture = false
                 }
                 return

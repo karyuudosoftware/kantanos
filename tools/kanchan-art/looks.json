@@ -1,0 +1,53 @@
+{
+ "_about": "Kan-chan's looks. Each: the drawing in source/, how to frame it (box = left, top, height in the drawing's pixels at 'scale'), where her face is in the framed 480x600 picture (face = left, top, right, bottom), and when she wears it (see when.json in the pack). Drawings by the KantanOS owner (pen sketches, finished with Gemini). eyes / mouth: the parts of the face that blink and talk frames may change.",
+ "everyday": {
+  "source": "everyday.jpg",
+  "scale": 1.0,
+  "bust": 0.5,
+  "face": [
+   140,
+   70,
+   340,
+   260
+  ],
+  "eyes": [
+   150,
+   105,
+   335,
+   190
+  ],
+  "mouth": [
+   175,
+   180,
+   300,
+   250
+  ]
+ },
+ "rain": {
+  "source": "rain.jpg",
+  "scale": 0.3333,
+  "box": [
+   140,
+   30,
+   525
+  ],
+  "face": [
+   120,
+   110,
+   254,
+   232
+  ],
+  "eyes": [
+   129,
+   131,
+   246,
+   190
+  ],
+  "mouth": [
+   150,
+   186,
+   229,
+   232
+  ]
+ }
+}
