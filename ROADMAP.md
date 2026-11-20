@@ -346,7 +346,7 @@ Steps:
       each day (`/usr/share/kantanos/helper/looks.py`).
       Frames: `tools/kanchan-art/make_pack.py` cuts the drawing out and asks the FLUX.2 picture
       model to change only her face; blink pastes back only the eyes and talking only the mouth,
-      so nothing else flickers. 8 frames per outfit, saved as 256-colour PNGs (16 MB in all).
+      so nothing else flickers. 8 frames per outfit, saved as 256-colour PNGs (12 MB in all).
       A designer-style monogram on one bag was painted plain before shipping. Shown in her
       window, the Helper and the desktop buddy. The old drawn SVG frames stay as the fallback
       and for "Make a character".
