@@ -58,8 +58,13 @@ is the owner's call; wait for the sketches before changing anything).
         installer made its own entry); check on the real PC.
       - Time & Date page still needs one visit: it shows the zone guessed from the internet, and a
         preset zone would be wrong for most people, so it stays as a one-click confirmation.
-- [~] Files: drive list fixed (system drive named "KantanOS", start-up and Windows helper partitions
-      and the read-only system image hidden); window title still says "Dolphin".
+- [x] Files: drive list fixed (system drive named "KantanOS", start-up and Windows helper partitions
+      and the read-only system image hidden). Window titles say "Documents — Files" ("ドキュメント —
+      ファイル" in Japanese): /usr/bin/dolphin is a small wrapper (`/usr/libexec/kantanos/files-name`)
+      that puts a one-line made-up language "kantanos" first for Dolphin only; KDE never reads US
+      English translations, so that's the only way to rename it without rebuilding it. Works from
+      the menu, the dock, and other apps opening a folder (D-Bus). VM-tested in English, the plain
+      C language and Japanese.
 - [x] Fixes from the first weeks on the real PC (Nov 2026): Windows ISOs not recognised
       (UDF), "What would you like to do?" and Force Quit missing Qt for Python, Windows-drive
       notice reworded, `ujust kantan-reset-dock` / `kantan-display-info` /

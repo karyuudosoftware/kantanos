@@ -90,7 +90,8 @@ A USB 2 stick is too slow for this OS; use USB 3 or, better, an SSD.
   `system_files/etc/xdg/dolphinrc`, `kwinrulesrc` (opening size), `/etc/skel/.local/state/dolphinstaterc`
   (sidebar width), `/usr/libexec/kantanos/files-setup` (sidebar, once per user).
   Try changes live with `tools/vm/push-files.py`. Not done: a `C:\` view (planned to be the
-  Windows-apps drive once Wine is set up), the window title still says "Dolphin".
+  Windows-apps drive once Wine is set up). Window titles say "Files" through
+  `/usr/libexec/kantanos/files-name`, installed as `/usr/bin/dolphin`.
 - Mode chooser (`/usr/libexec/kantanos/modes`, Python + QML): a full-screen "What would you
   like to do?" overlay after login and from the Modes dock icon. Tiles are `*.mode` files in
   `/usr/share/kantanos/modes` (Desktop, Game Mode = Steam Big Picture, Retro Games = Boxshelf

@@ -1,0 +1,22 @@
+#!/bin/sh
+# KantanOS: the file manager is called "Files" (ファイル in Japanese), not "Dolphin".
+#
+# build.sh moves the real program to /usr/libexec/kantanos/dolphin-bin and installs this as
+# /usr/bin/dolphin, so every way of opening it (app menu, dock, a folder, other apps asking
+# for the file manager over D-Bus) goes through here. Dolphin adds its name to every window
+# title through KDE's translations; KDE never reads translations for US English (the
+# language it is written in), so a tiny made-up language "kantanos" goes first in the list:
+# its only translation is the name (/usr/share/locale/kantanos*/LC_MESSAGES/dolphin.mo), and
+# everything else falls through to the person's own languages.
+langs=${LANGUAGE:-$(printf '%s' "${LC_ALL:-${LC_MESSAGES:-$LANG}}" | sed 's/[.@].*//')}
+case "$langs" in
+    ""|C|POSIX)      # translations (and so the name) are switched off in the plain C language
+        langs=en_US
+        export LC_MESSAGES=en_US.UTF-8
+        [ -n "$LC_ALL" ] && export LC_ALL=en_US.UTF-8 ;;
+esac
+case "$langs" in
+    ja*) first=kantanos_ja ;;
+    *) first=kantanos ;;
+esac
+LANGUAGE="$first:${langs:-en_US}" exec /usr/libexec/kantanos/dolphin-bin "$@"

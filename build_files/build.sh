@@ -230,6 +230,16 @@ sed -i -e '/^Name\[/d' -e '/^Comment\[/d' -e 's|^Keywords=.*|Keywords=kantanos;w
 # rule for its opening size, and files-setup for the sidebar.
 sed -i -e 's|^Name=Dolphin$|Name=Files|' -e 's|^GenericName=File Manager$|GenericName=File Manager (Dolphin)|' \
     /usr/share/applications/org.kde.dolphin.desktop
+# ...and in its window titles ("Documents — Files", "ドキュメント — ファイル"): a one-line
+# translation in a made-up language "kantanos" that /usr/libexec/kantanos/files-name puts first
+# for Dolphin only (see there why), installed in Dolphin's place.
+for l in kantanos:Files kantanos_ja:ファイル; do
+    mkdir -p "/usr/share/locale/${l%%:*}/LC_MESSAGES"
+    printf 'msgid ""\nmsgstr ""\n"Content-Type: text/plain; charset=UTF-8\\n"\n\nmsgid "Dolphin"\nmsgstr "%s"\n' "${l#*:}" \
+        | msgfmt -o "/usr/share/locale/${l%%:*}/LC_MESSAGES/dolphin.mo" -
+done
+mv /usr/bin/dolphin /usr/libexec/kantanos/dolphin-bin
+install -m 0755 /usr/libexec/kantanos/files-name /usr/bin/dolphin
 
 # Spotlight-style search: Win+Space opens it too (Cmd+Space on a Mac), besides Alt+Space.
 sed -i 's|^X-KDE-Shortcuts=Alt+Space,Alt+F2,Search$|X-KDE-Shortcuts=Meta+Space,Alt+Space,Alt+F2,Search|'     /usr/share/kglobalaccel/org.kde.krunner.desktop
