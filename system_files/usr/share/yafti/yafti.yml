@@ -24,6 +24,11 @@ screens:
         description: "Run Android apps on this PC in their own windows, listed in your apps menu. Set up once (downloads about 1 GB), then double-click any .apk file to install it."
         default: false
         script: "nohup setsid kantan-android setup >&/dev/null"
+      - id: "home"
+        title: "Smart home"
+        description: "See and change the house temperature from the top bar, for example a Google Nest thermostat, through Home Assistant (free; runs in your home or on this PC)."
+        default: false
+        script: "nohup setsid kantan-home >&/dev/null"
       - id: "nas"
         title: "Connect your NAS"
         description: "Make the shared folders on your NAS (for example a TrueNAS box) work like normal folders in every app. Asks for the NAS user name and password once."
@@ -345,7 +350,7 @@ screens:
     actions:
       - id: "hgl"
         title: "Heroic Games Launcher"
-        description: "Epic Games Store, GOG and Amazon Prime Gaming. In Heroic, open a game's menu and choose \"Add to Steam\" to see it in Game Mode."
+        description: "Epic Games Store, GOG and Amazon Prime Gaming. Games you install appear in Game Mode by themselves, with their box art."
         default: false
         status_script: "kantan-app status com.heroicgameslauncher.hgl"
         options:
@@ -393,6 +398,21 @@ screens:
         description: "Chat with Kan-chan by talking or typing. She remembers what you tell her (you can see, change or delete it all in \"What I remember\"), suggests what to cook and keeps you company. Everything stays on this PC. Adds her to the app menu."
         default: false
         script: "nohup setsid /usr/libexec/kantanos/kanchan --enable >&/dev/null"
+      - id: "docs"
+        title: "Letters and documents"
+        description: "Open a letter, bill or form (PDF, scan or photo) and get it in plain words: what it says, what you need to do and by when, and anything that looks like a scam. Checks your own writing too, and reads anything aloud. The AI runs on this PC."
+        default: false
+        script: "nohup setsid kantan-docs >&/dev/null"
+      - id: "pictures"
+        title: "Picture helper"
+        description: "Hear what's in a picture: the AI on this PC describes it in plain words (people, place, colours, any writing) and answers questions about it. It can also look through your photos once, so typing \"beach\" or \"birthday cake\" finds them. Photos never leave this PC."
+        default: false
+        script: "nohup setsid kantan-pictures >&/dev/null"
+      - id: "recipes"
+        title: "Recipe book"
+        description: "Keep the family's recipes in one place: type them in, bring them from a website, or take them from a photo of a cookbook page. Change how many a recipe serves, then cook from big step-by-step pages with timers, read aloud if you like."
+        default: false
+        script: "nohup setsid kantan-recipes >&/dev/null"
       - id: "access"
         title: "Make the PC easier to see and hear"
         description: "Screen reader (reads the screen out loud), everything bigger, bigger text and mouse pointer, a magnifier. Kan-chan can also read your email out loud and remind you about appointments."
