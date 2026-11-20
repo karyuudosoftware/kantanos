@@ -10,7 +10,9 @@ looks that aren't drawn yet are skipped:
     {"look": "pyjamas", "hours": [22, 6]},           from 22:00 to 06:00
     {"look": "summer",  "months": [7, 8]},
     {"look": "hoodie",  "days": [5, 6]},             Saturday, Sunday (Monday = 0)
+    {"choose": ["suit", "blazer"], "days": [0, 1, 2, 3, 4]}   one of these, a different one each day
     {"look": "everyday"}]}                           no conditions: the default
+Weather can be "rain", "snow", "hot" (28 °C or more and dry) or "clear".
 
 Weather comes from Open-Meteo for the town the KantanOS Weather widget shows (else the PC's
 location from "ujust kantan-set-location"): only those coordinates are sent, the same request
@@ -27,6 +29,7 @@ HOME = os.path.expanduser("~")
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.join(HOME, ".cache")), "kantanos", "weather-now.json")
 RAIN = set(range(51, 68)) | set(range(80, 83)) | set(range(95, 100))
 SNOW = set(range(71, 78)) | {85, 86}
+HOT = 28          # °C: swimwear weather
 
 
 def where():
@@ -58,13 +61,14 @@ def weather_now(max_age=1800, fetch=True):
     if not place:
         return ""
     url = (f"https://api.open-meteo.com/v1/forecast?latitude={place[0]:.2f}&longitude={place[1]:.2f}"
-           "&current=weather_code")
+           "&current=weather_code,temperature_2m")
     try:
         with urllib.request.urlopen(url, timeout=8) as r:
-            code = int(json.load(r)["current"]["weather_code"])
-    except (OSError, ValueError, KeyError):
+            now = json.load(r)["current"]
+            code, temp = int(now["weather_code"]), float(now.get("temperature_2m", 0))
+    except (OSError, ValueError, KeyError, TypeError):
         return ""
-    w = "rain" if code in RAIN else "snow" if code in SNOW else "clear"
+    w = "rain" if code in RAIN else "snow" if code in SNOW else "hot" if temp >= HOT else "clear"
     os.makedirs(os.path.dirname(CACHE), exist_ok=True)
     with open(CACHE + ".tmp", "w") as f:
         json.dump({"time": time.time(), "weather": w, "code": code}, f)
@@ -113,6 +117,12 @@ def current(pack, context="", now=None, weather=None):
             cached["w"] = weather if weather is not None else weather_now()
         return cached["w"]
     for rule in rules(pack):
+        if "choose" in rule:            # one of several, a different one each day (same all day)
+            pool = [l for l in rule["choose"] if drawn(pack, l)]
+            if pool and fits(rule, now, w, context):
+                day = time.mktime(now[:3] + (12, 0, 0, 0, 0, -1)) // 86400
+                return os.path.join(pack, "looks", pool[int(day) % len(pool)])
+            continue
         look = rule.get("look", "")
         if drawn(pack, look) and fits(rule, now, w, context):
             return os.path.join(pack, "looks", look)
@@ -137,6 +147,16 @@ def self_test():
     assert name(now=t(14, 8), weather="clear") == "everyday"            # no summer drawing yet
     assert name(now=t(14), weather="clear", context="helper") == "everyday"   # no doctor drawing yet
     assert current(os.path.join(tmp, "looks", "rain")) == os.path.join(tmp, "looks", "rain")  # no looks: itself
+    for look in ("suit", "blazer"):
+        os.makedirs(os.path.join(tmp, "looks", look))
+        open(os.path.join(tmp, "looks", look, "idle.png"), "w").close()
+    json.dump({"looks": [{"choose": ["suit", "blazer", "undrawn"], "days": [0, 1, 2, 3, 4]}, {"look": "everyday"}]},
+              open(os.path.join(tmp, "when.json"), "w"))
+    day = lambda d: time.localtime(time.mktime((2026, 11, d, 14, 0, 0, 0, 0, -1)))       # noqa: E731
+    picks = {name(now=day(d), weather="clear") for d in (16, 17, 18)}                   # Mon-Wed
+    assert picks == {"suit", "blazer"}, picks
+    assert name(now=day(16), weather="clear") == name(now=day(16), weather="clear")     # same all day
+    assert name(now=day(21), weather="clear") == "everyday"                             # Saturday
     return True
 
 

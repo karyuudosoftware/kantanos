@@ -64,22 +64,38 @@ def main():
             src = src.resize((int(src.width * spec["scale"]), int(src.height * spec["scale"])), Image.LANCZOS)
         base = cutout.frame(cutout.cut(src), spec.get("bust", 0.5), tuple(spec["box"]) if spec.get("box") else None)
         base.save(os.path.join(out, "idle.png"))
+        # Only a square around her face goes to the picture model (much quicker than the whole
+        # picture, and it keeps the model's attention on the face). "crop": false = whole picture.
+        crop = None
+        if spec.get("crop", True):
+            fx0, fy0, fx1, fy1 = spec["face"]
+            side = int(max(fx1 - fx0, fy1 - fy0) * 1.5)
+            cx, cy = (fx0 + fx1) // 2, (fy0 + fy1) // 2
+            x0 = min(max(0, cx - side // 2), base.width - side)
+            y0 = min(max(0, cy - side // 2), base.height - side)
+            crop = (x0, y0, x0 + side, y0 + side)
         ref = os.path.join(out, ".ref.png")
-        on_white(base).save(ref)
+        (on_white(base).crop(crop) if crop else on_white(base)).save(ref)
+        size = (320, 320) if crop else (480, 608)
         for frame, words in FACES.items():
             dest = os.path.join(out, frame + ".png")
             if os.path.exists(dest) and "--again" not in sys.argv and "--paste" not in sys.argv:
                 continue
-            raw = os.path.join(out, f".{frame}-raw.png")
+            raw = os.path.join(out, f".{frame}-{'face' if crop else 'raw'}.png")
             t0 = time.time()
             if not os.path.exists(raw) or "--again" in sys.argv:
-                cmd = painter.command(words + KEEP, raw, (480, 608), 7, reference=ref,
+                cmd = painter.command(words + KEEP, raw, size, 7, reference=ref,
                                       cpu=bool(os.environ.get("KANTAN_SD_CPU")))
                 painter.run(cmd)
             # a blink only changes the eyes and talking only the mouth, so nothing else flickers
             part = REGION.get(frame, "face")
             mask = face_mask(base.size, spec.get(part) or spec["face"], 10 if part != "face" else 14)
-            edited = Image.open(raw).convert("RGB").resize(base.size, Image.LANCZOS)
+            if crop:
+                edited = on_white(base)
+                edited.paste(Image.open(raw).convert("RGB").resize((crop[2] - crop[0], crop[3] - crop[1]),
+                                                                  Image.LANCZOS), crop[:2])
+            else:
+                edited = Image.open(raw).convert("RGB").resize(base.size, Image.LANCZOS)
             merged = on_white(base)
             merged.paste(edited, mask=mask)              # only the face changes
             result = merged.convert("RGBA")

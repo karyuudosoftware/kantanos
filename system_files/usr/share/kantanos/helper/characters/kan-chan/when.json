@@ -1,15 +1,109 @@
 {
- "_about": "Which of Kan-chan's outfits (looks/<name>/) she wears: the first rule that fits wins; outfits not drawn yet are skipped. See /usr/share/kantanos/helper/looks.py.",
+ "_about": "Which of Kan-chan's outfits (looks/<name>/) she wears: the first rule that fits wins; 'choose' picks a different one each day; outfits not drawn are skipped. See /usr/share/kantanos/helper/looks.py.",
  "looks": [
-  {"look": "doctor", "context": "helper"},
-  {"look": "rain", "weather": "rain"},
-  {"look": "winter", "weather": "snow"},
-  {"look": "pyjamas", "hours": [22, 6]},
-  {"look": "summer", "months": [7, 8]},
-  {"look": "spring", "months": [3, 4, 5]},
-  {"look": "autumn", "months": [9, 10, 11]},
-  {"look": "winter", "months": [12, 1, 2]},
-  {"look": "hoodie", "days": [5, 6]},
-  {"look": "everyday"}
+  {
+   "look": "doctor",
+   "context": "helper"
+  },
+  {
+   "look": "pyjamas",
+   "hours": [
+    22,
+    6
+   ]
+  },
+  {
+   "look": "rain",
+   "weather": "rain"
+  },
+  {
+   "look": "winter",
+   "weather": "snow"
+  },
+  {
+   "look": "swim",
+   "weather": "hot",
+   "days": [
+    5,
+    6
+   ]
+  },
+  {
+   "choose": [
+    "suit",
+    "blazer-black",
+    "blazer-cream",
+    "blazer-brown",
+    "everyday",
+    "techwear-2"
+   ],
+   "days": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  {
+   "choose": [
+    "spring",
+    "stripes-skirt",
+    "polo-green",
+    "hoodie",
+    "haori"
+   ],
+   "months": [
+    3,
+    4,
+    5
+   ]
+  },
+  {
+   "choose": [
+    "summer",
+    "cap",
+    "stripes-skirt",
+    "polo-green"
+   ],
+   "months": [
+    6,
+    7,
+    8
+   ]
+  },
+  {
+   "choose": [
+    "autumn",
+    "plaid-jacket",
+    "argyle",
+    "parka-dress",
+    "polo-brown",
+    "haori"
+   ],
+   "months": [
+    9,
+    10,
+    11
+   ]
+  },
+  {
+   "choose": [
+    "winter",
+    "fleece",
+    "sweats",
+    "plaid-jacket",
+    "argyle",
+    "hoodie"
+   ],
+   "months": [
+    12,
+    1,
+    2
+   ]
+  },
+  {
+   "look": "everyday"
+  }
  ]
 }
