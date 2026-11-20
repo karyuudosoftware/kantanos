@@ -10,7 +10,7 @@ KANTAN_IMAGE="${KANTAN_IMAGE:-}"
 ### 1. System files -----------------------------------------------------------
 # The sources live on a Windows drive, so do not trust their permissions.
 cp -rT --no-preserve=mode,ownership /ctx/system /
-chmod 0755 /usr/libexec/kantanos/* /usr/bin/kantan-app /usr/bin/kantan-look /usr/bin/kantan-windows
+chmod 0755 /usr/libexec/kantanos/* /usr/bin/kantan-*
 
 ### 2. Packages ---------------------------------------------------------------
 # Japanese input (fcitx5 + Mozc), Japanese locale, the Inter UI font, a media player.
