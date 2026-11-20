@@ -1,0 +1,12 @@
+[Unit]
+Description=KantanOS: make sure the firmware has a start-up entry for KantanOS
+Documentation=file:///usr/libexec/kantanos/boot-entry
+ConditionFirmware=uefi
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/kantanos/boot-entry
+
+[Install]
+WantedBy=multi-user.target

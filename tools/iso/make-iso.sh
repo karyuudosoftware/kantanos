@@ -18,5 +18,7 @@ podman run --rm --privileged --pull=newer \
 DEST="$HERE/../../output/iso"
 mkdir -p "$DEST"
 VERSION=$(podman run --rm --entrypoint bash "$LOCAL_IMAGE:latest" -c '. /usr/lib/os-release; echo $KANTAN_VERSION')
-cp "$OUT/bootiso/install.iso" "$DEST/KantanOS-$VERSION-x86_64.iso"
+# KantanOS name in the installer title and boot menus (tools/iso/brand-iso.sh)
+for tool in xorriso mtools cpio gawk squashfs-tools; do rpm -q "$tool" >/dev/null || dnf5 -y -q install "$tool"; done
+bash "$HERE/brand-iso.sh" "$OUT/bootiso/install.iso" "$DEST/KantanOS-$VERSION-x86_64.iso" "$VERSION"
 ls -la "$DEST"

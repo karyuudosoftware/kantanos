@@ -507,6 +507,10 @@ class Backend(QObject):
 
 
 def main():
+    # Never over KDE's first-start wizard (plasma-setup), which asks for the PC's first account
+    import pwd
+    if "--login" in sys.argv and pwd.getpwuid(os.getuid()).pw_name == "plasma-setup":
+        return 0
     # Always shown to root, so the warning about the root login is never missed.
     if "--login" in sys.argv and not read_show_at_login() and os.geteuid() != 0:
         return 0

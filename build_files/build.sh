@@ -267,6 +267,14 @@ grep -q 'x-msi=kantanos-windows-program.desktop' /etc/xdg/mimeapps.list
 # Installed systems get the Windows-style local hardware clock once (the installer writes UTC).
 systemctl enable kantanos-local-clock.service
 
+# If the installer finished without a normal user account (only the Root Account page filled
+# in), KDE's first-start wizard asks for one before the login screen; on every other PC it
+# marks itself done (/usr/libexec/kantanos/first-user-check, plasma-setup.service.d).
+dnf5 -y install plasma-setup efibootmgr
+systemctl enable plasma-setup.service
+# A firmware start-up entry for KantanOS when the installer didn't make one (seen on a real PC)
+systemctl enable kantanos-boot-entry.service
+
 # The system drive is called "KantanOS" in Files, not the installer's label "root" (once).
 systemctl enable kantanos-drive-label.service
 

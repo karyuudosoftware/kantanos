@@ -130,6 +130,7 @@ A USB 2 stick is too slow for this OS; use USB 3 or, better, an SSD.
   `ghcr.io/karyuudosoftware/kantanos`). `tools/check-published.sh` re-checks access and signature;
   `tools/ci-wait.sh` waits for the newest GitHub build. Old dated tags are never cleaned up yet.
 - Installer: KantanOS logo and colours, plus language, keyboard and time zone pages, come from
-  `tools/iso/make-iso-config.sh` (the artwork rides in the kickstart's `%pre`). Still stock:
-  the title says "KantanOS 45" (the Fedora release number), and the time zone page needs one visit.
+  `tools/iso/make-iso-config.sh` (the artwork rides in the kickstart's `%pre`); the title and boot
+  menus say KantanOS (`tools/iso/brand-iso.sh`, run by `make-iso.sh`). The time zone page needs
+  one visit (it confirms the zone the installer guessed).
 - Nothing has been tested on real hardware (NVIDIA, HDR, 7.1 audio).

@@ -1,0 +1,38 @@
+#!/bin/bash
+# KantanOS: make sure the PC's firmware has a start-up entry for KantanOS.
+#
+# Seen on a real PC (Gigabyte, 2026-11): after installing, the firmware had no entry for the
+# new disk although its EFI partition held everything needed, so it only started from the
+# firmware's one-time boot menu. This adds "KantanOS" (\EFI\fedora\shimx64.efi on the disk
+# KantanOS started from) when no entry already points there, first in the start-up order like
+# the installer would have done. Nothing changes when an entry exists.
+set -euo pipefail
+[ -d /sys/firmware/efi/efivars ] || exit 0
+command -v efibootmgr >/dev/null || exit 0
+
+# The disk KantanOS is running from, and its EFI system partition
+src=$(findmnt -no SOURCE /sysroot 2>/dev/null || findmnt -no SOURCE /)
+src=${src%%[*}
+disk=$(lsblk -no PKNAME "$src" 2>/dev/null | head -1)
+[ -n "$disk" ] || exit 0
+# Never for a USB stick (the run-from-USB image): that is started from the boot menu on purpose
+[ "$(cat "/sys/block/$disk/removable" 2>/dev/null)" = 1 ] && exit 0
+[ "$(lsblk -dno TRAN "/dev/$disk" 2>/dev/null)" = usb ] && exit 0
+esp=$(lsblk -lnpo NAME,PARTTYPE "/dev/$disk" | awk 'tolower($2)=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b" {print $1; exit}')
+[ -n "$esp" ] || exit 0
+partuuid=$(lsblk -no PARTUUID "$esp" | tr 'A-Z' 'a-z')
+partnum=$(cat "/sys/class/block/$(basename "$esp")/partition")
+loader='\EFI\fedora\shimx64.efi'
+
+entries=$(efibootmgr -v 2>/dev/null | tr 'A-Z' 'a-z')
+if grep -F "$partuuid" <<<"$entries" | grep -qF 'shimx64.efi'; then
+    exit 0                                      # already there
+fi
+# Only if the start-up files really are on that partition
+tmp=$(mktemp -d)
+trap 'umount "$tmp" 2>/dev/null; rmdir "$tmp"' EXIT
+mount -o ro "$esp" "$tmp"
+[ -f "$tmp/EFI/fedora/shimx64.efi" ] || { echo "no shimx64.efi on $esp"; exit 0; }
+umount "$tmp"
+efibootmgr -q -c -d "/dev/$disk" -p "$partnum" -L KantanOS -l "$loader"
+echo "Added the KantanOS start-up entry for /dev/$disk (partition $partnum)"

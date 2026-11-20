@@ -1,0 +1,11 @@
+#!/bin/bash
+# KantanOS: should Plasma Setup (KDE's first-start wizard) run before the login screen?
+# Only when the installer finished without a normal user account (for example when only the
+# Root Account page was filled in): then the wizard asks for a name and password and makes
+# that person the PC's administrator. On every other PC it marks itself done and never runs.
+# Used as ExecCondition of plasma-setup.service: exit 0 = run the wizard, 1 = skip.
+if awk -F: '$3 >= 1000 && $3 < 60000 && $7 !~ /(nologin|false)$/ {found=1} END {exit !found}' /etc/passwd; then
+    touch /etc/plasma-setup-done
+    exit 1
+fi
+exit 0

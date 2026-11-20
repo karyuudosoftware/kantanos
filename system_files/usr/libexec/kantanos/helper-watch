@@ -185,7 +185,9 @@ class Watch:
 
 
 if __name__ == "__main__":
-    if not load_cfg().get("watch", True):
+    # Not in the session KDE's first-start wizard (plasma-setup) runs in to create an account
+    import pwd
+    if not load_cfg().get("watch", True) or pwd.getpwuid(os.getuid()).pw_name == "plasma-setup":
         sys.exit(0)
     if len(sys.argv) > 1 and sys.argv[1] == "--now":      # for testing: no quiet minute
         QUIET_AFTER_LOGIN = 0

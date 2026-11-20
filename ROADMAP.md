@@ -41,8 +41,23 @@ is the owner's call; wait for the sketches before changing anything).
 - [x] NAS: `ujust kantan-nas-connect` (or Welcome) connects SMB shares as normal folders.
 - [ ] 7.1 sound: confirm on the receiver (Multichannel/Direct listening mode) with the
       speaker test; look at the channel layout only if that does not fix it.
-- [ ] Installer: stop a root-only setup (the warning after login is the safety net for now);
-      title shows the Fedora release number; firmware boot entry not always created.
+- [~] Installer fixes (Nov 2026):
+      - Root-only setup: the installer itself can't be made to insist on a user (it counts a root
+        password as an administrator; "rootpw --lock" let it install with no account at all), so
+        KDE's first-start wizard (plasma-setup) now runs before the login screen when a PC has no
+        normal account, and makes the person it creates the administrator. On every other PC it
+        marks itself done (`/usr/libexec/kantanos/first-user-check`). VM-tested end to end: a
+        root-only install showed the wizard (language, keyboard, dark theme, account, PC name,
+        time zone), the new account was on the login screen, and the wizard didn't come back.
+        The "What would you like to do?" screen and Helper watch stay out of the wizard's session.
+      - Title: "KANTANOS 0.1 INSTALLATION" instead of the Fedora number, and "Install KantanOS" in
+        all three boot menus (BIOS, UEFI disc, UEFI USB stick): `tools/iso/brand-iso.sh` adds the
+        installer's own product.img and fixes the menus after bootc-image-builder.
+      - Firmware start-up entry: `kantanos-boot-entry.service` adds "KantanOS" when no entry points
+        at the disk it started from (never for a USB stick). Not yet seen adding one (the VM's
+        installer made its own entry); check on the real PC.
+      - Time & Date page still needs one visit: it shows the zone guessed from the internet, and a
+        preset zone would be wrong for most people, so it stays as a one-click confirmation.
 - [~] Files: drive list fixed (system drive named "KantanOS", start-up and Windows helper partitions
       and the read-only system image hidden); window title still says "Dolphin".
 - [x] Fixes from the first weeks on the real PC (Nov 2026): Windows ISOs not recognised
