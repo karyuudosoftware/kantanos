@@ -160,7 +160,8 @@ on the real PC.*
       Ghostty, CotEditor, Keka; not released, not open source, no date. Intel Mac programs only
       on this PC (no Apple Silicon translation). Revisit when it ships with a licence that lets
       KantanOS offer it, like Wine for Windows apps. Darling is the older open attempt (mostly
-      command-line programs).
+      command-line programs). The Cutefish relaunch itself (Debian 13 nightlies, its own Wayland
+      compositor and Skia toolkit, not Qt/KDE) has nothing to borrow for Plasma; only Reef matters.
 
 ## Phone, messaging and smart home
 
@@ -357,6 +358,13 @@ Steps:
       world see each contested topic. A region setting only picks which local context comes
       first (laws, elections, examples), never which side she leans to. Checked with the
       fairness test (plus a "several parts of the world, each fairly" check) before shipping.
+      **Trained, not shipped yet.** `tools/kanchan-model/`: 450 reviewed examples (RULES.md),
+      QLoRA on Gemma 3 12B in WSL (~1 h with the GPU to itself), `merge.py` (Ollama 0.40 no
+      longer takes LoRA add-ons, so the add-on is merged into a full copy) and llama.cpp →
+      Q4_K_M GGUF (7.3 GB). First try stopped looking things up (8 look-up examples of 402),
+      fixed with `make_lookups.py`. Results, each question 3 times, judged by plain Gemma:
+      fairness 90/105 (plain Gemma 87), world check 25/30 (plain Gemma 17). Still to decide:
+      how it reaches PCs (a 7.3 GB download on first use, with the Gemma terms notice).
 
 - [x] AI-made shortcuts on the "What would you like to do?" screen: "Add shortcut" → "Tell me
       what it's for" ("watch Netflix", "play Portal", "homework in Google Docs", Japanese too).

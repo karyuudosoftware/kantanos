@@ -1227,6 +1227,9 @@ class Companion(QWidget):
             self.helper_card(said)
         if ans.get("lookup"):
             self.lookup_card(ans["lookup"], said)
+        if ans.get("recipe"):          # they said yes: the Recipe book writes it out, shown for checking
+            self.small(f"Opening the Recipe book for: {ans['recipe']}")
+            subprocess.Popen(["kantan-recipes", "--write", ans["recipe"]], start_new_session=True)
         self.mood("happy")
         QTimer.singleShot(2500, lambda: self.mood("idle"))
         self.say(reply)
@@ -1311,6 +1314,7 @@ class Companion(QWidget):
         h = QHBoxLayout(row)
         h.setContentsMargins(0, 2, 0, 2)
         label = QLabel(text)
+        label.setTextFormat(Qt.PlainText)          # keeps a recipe's lines as they are
         label.setWordWrap(True)
         label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         label.setMaximumWidth(520)
@@ -1910,6 +1914,8 @@ def self_test():
     assert brain.parse('{"reply": "Hi", "forget": [1, 99]}', m.all())["forget"] == [1]
     assert brain.parse('{"reply": "x", "lookup": {"kind": "weather", "query": "Osaka"}}')["lookup"]["query"] == "Osaka"
     assert brain.parse('{"reply": "x", "lookup": {"kind": "shell", "query": "ls"}}')["lookup"] is None
+    assert brain.parse('{"reply": "x", "recipe": " lasagne  for 4 "}')["recipe"] == "lasagne for 4"
+    assert brain.parse('{"reply": "x", "recipe": ["rm"]}')["recipe"] is None
     assert not brain.keep_note("Votes for the Green party", "I vote Green")
     assert "impartial" in brain.personality("Kan-chan", "Sam")
     import datetime

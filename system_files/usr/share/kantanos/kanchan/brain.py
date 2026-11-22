@@ -209,9 +209,43 @@ def calendar(now=None):
     return "; ".join(days)
 
 
-def personality(name="Kan-chan", person="", now=None):
+NICE_COUNTRY = {"Britain (UK)": "the United Kingdom", "United States": "the United States",
+                "Korea (South)": "South Korea", "Korea (North)": "North Korea", "Netherlands": "the Netherlands",
+                "Philippines": "the Philippines", "Czech Republic": "Czechia", "Russia": "Russia",
+                "Taiwan": "Taiwan", "China": "China", "Ireland": "Ireland"}
+
+
+def home_country(zone_file="/etc/localtime", zoneinfo="/usr/share/zoneinfo"):
+    """The country this PC is in, from its time zone (Europe/London -> United Kingdom); '' if unknown.
+    Only used so local laws and examples can come first; nothing is looked up online."""
+    try:
+        zone = os.path.realpath(zone_file).split("zoneinfo/", 1)[1]
+        code = ""
+        for line in open(os.path.join(zoneinfo, "zone1970.tab"), encoding="utf-8"):
+            f = line.rstrip("\n").split("\t")
+            if len(f) > 2 and not line.startswith("#") and f[2] == zone:
+                code = f[0].split(",")[0]
+                break
+        for line in open(os.path.join(zoneinfo, "iso3166.tab"), encoding="utf-8"):
+            f = line.rstrip("\n").split("\t")
+            if len(f) > 1 and f[0] == code:
+                return NICE_COUNTRY.get(f[1], f[1])
+    except (OSError, IndexError):
+        pass
+    return ""
+
+
+def where_text(country):
+    if not country:
+        return ""
+    return (f" They live in {country}: when local context helps (its laws, elections, examples), start with "
+            f"{country}'s, and still lay out every view the same way.")
+
+
+def personality(name="Kan-chan", person="", now=None, country=None):
     with open(PERSONALITY, encoding="utf-8") as f:
-        return f.read().format(name=name, person=person or "the person", now=now_text(now), calendar=calendar(now))
+        return f.read().format(name=name, person=person or "the person", now=now_text(now), calendar=calendar(now),
+                               where=where_text(home_country() if country is None else country))
 
 
 def due_plans(notes, now=None):
@@ -245,10 +279,10 @@ def check_in_text(person, notes, now=None):
     return f"{hello} I'm here if you'd like a chat."
 
 
-def build_messages(name, person, notes, history, now=None, style=""):
+def build_messages(name, person, notes, history, now=None, style="", country=None):
     """notes: Memory.all() (or [] when talking to an online AI: notes never leave the PC).
     style: a made character's personality style (maker.style_text), after the rules."""
-    system = personality(name, person, now)
+    system = personality(name, person, now, country)
     if style:
         system += "\n\n" + style
     if notes:
@@ -315,7 +349,7 @@ def complete(ep, messages, temperature=0.6, json_mode=True, timeout=120):
 
 
 def parse(text, notes=()):
-    """The model's JSON answer, cleaned up: never trusted beyond these four fields."""
+    """The model's JSON answer, cleaned up: never trusted beyond these fields."""
     text = re.sub(r"(?s)<think>.*?</think>", "", text or "")
     m = re.search(r"\{.*\}", text, re.S)
     try:
@@ -341,8 +375,10 @@ def parse(text, notes=()):
         lookup = {"kind": look["kind"], "query": re.sub(r"\s+", " ", str(look["query"])).strip()[:100]}
         # never a guessed answer before the look-up: just say she'd like to check
         reply = "ちょっと調べてみるね。" if re.search(r"[぀-ヿ一-鿿]", reply) else "Let me check that online for you."
+    recipe = ans.get("recipe")      # a dish for the Recipe book to write out in full (only after a yes)
+    recipe = re.sub(r"\s+", " ", recipe).strip()[:120] or None if isinstance(recipe, str) else None
     return {"reply": reply, "remember": remember,
-            "forget": forget, "helper": ans.get("helper") is True, "lookup": lookup}
+            "forget": forget, "helper": ans.get("helper") is True, "lookup": lookup, "recipe": recipe}
 
 
 # ---- looking things up online (always after asking) ----------------------------------------
