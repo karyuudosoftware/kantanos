@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>KantanOS</vendor>
+  <action id="org.kantanos.site-blocker">
+    <description>Change which sites this PC blocks</description>
+    <message>Changing which sites are blocked needs the PC's password.</message>
+    <!-- A safety setting for the whole family: unlike the other KantanOS helpers this one
+         asks for an administrator's password, so it can't be switched off by whoever happens
+         to be sitting at the PC. Asked once, then remembered for a few minutes. -->
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/kantanos/site-blocker-apply</annotate>
+  </action>
+</policyconfig>

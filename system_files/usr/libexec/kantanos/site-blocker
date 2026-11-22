@@ -1,0 +1,353 @@
+#!/usr/bin/python3
+"""KantanOS: Block bad sites (Welcome → Tools, or the app menu).
+
+One window for the two ways KantanOS keeps the PC away from bad sites:
+- a list of known bad site names, sorted into categories that can each be turned off
+  (viruses and scams, shock sites, tracking, adverts, shop and deal links), with an
+  "always allow" list and a box to ask "is this site being blocked?";
+- a safe look-up service (Quad9) that also refuses sites too new for any list.
+
+Nothing changes until "Save" is pressed, which asks for the PC's password once
+(pkexec → site-blocker-apply). The rules themselves are in
+/usr/share/kantanos/site-blocker/blocker.py.
+
+  site-blocker             open the window
+  site-blocker --self-test for the image checks
+"""
+import json
+import os
+import sys
+import time
+
+from PySide6.QtCore import QProcess, Qt
+from PySide6.QtGui import QFont, QIcon
+from PySide6.QtWidgets import (QApplication, QCheckBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+                               QPushButton, QScrollArea, QVBoxLayout, QWidget)
+
+sys.path.insert(0, "/usr/share/kantanos/site-blocker")
+import blocker                                                            # noqa: E402
+
+TITLE = "Block bad sites"
+APPLY = "/usr/libexec/kantanos/site-blocker-apply"
+
+
+def when(stamp):
+    if not stamp:
+        return ""
+    t = time.localtime(stamp)
+    return f"{t.tm_mday} {time.strftime('%B', t)}"
+
+
+class Window(QWidget):
+    def __init__(self, core=None):
+        super().__init__()
+        self.core = core or blocker.Blocker("/")
+        self.names, _ = self.core.names()
+        self.saved = self.core.settings()
+        self.allow = list(self.saved["allow"])
+        self.proc = None
+        self.found = None
+
+        self.setWindowTitle(TITLE)
+        self.setWindowIcon(QIcon.fromTheme("security-high"))
+        f = self.font()
+        f.setPointSizeF(max(f.pointSizeF() * 1.2, 12))
+        self.setFont(f)
+        self.resize(860, 900)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        outer.addWidget(scroll)
+        page = QWidget()
+        scroll.setWidget(page)
+        v = QVBoxLayout(page)
+        v.setContentsMargins(28, 24, 28, 12)
+        v.setSpacing(10)
+
+        title = QLabel(TITLE)
+        tf = QFont(f); tf.setPointSizeF(f.pointSizeF() * 1.5); tf.setBold(True)
+        title.setFont(tf)
+        v.addWidget(title)
+        v.addWidget(self.note("KantanOS keeps this PC away from sites known for viruses, scams, tracking and "
+                              "adverts, in every browser and app. If a site you trust won't open, you can turn "
+                              "off one kind of blocking or allow just that site."))
+
+        self.on = QCheckBox("Block sites on the list")
+        self.on.setChecked(self.saved["on"])
+        self.on.setFont(self.bold(f))
+        self.on.toggled.connect(self.changed)
+        v.addWidget(self.on)
+
+        self.cats = {}
+        self.cat_notes = {}
+        for cid, name, what in blocker.CATEGORIES:
+            box = QCheckBox(name)
+            box.setChecked(self.saved["categories"][cid])
+            box.toggled.connect(self.changed)
+            self.cats[cid] = box
+            v.addWidget(box, 0, Qt.AlignLeft)
+            self.cat_notes[cid] = self.note("", indent=True)
+            self.cat_notes[cid].setProperty("what", what)
+            v.addWidget(self.cat_notes[cid])
+
+        v.addSpacing(6)
+        self.dns = QCheckBox("Safe look-up service (Quad9)")
+        self.dns.setChecked(self.saved["safe_dns"])
+        self.dns.setFont(self.bold(f))
+        self.dns.toggled.connect(self.changed)
+        v.addWidget(self.dns)
+        v.addWidget(self.note("Before any site opens, the PC looks up where it lives. With this on, a non-profit "
+                              "service called Quad9 does that look-up and refuses sites known for viruses and "
+                              "scams, including ones too new for the list. Quad9 then sees which site names this "
+                              "PC looks up, in place of your internet provider; it says it keeps no record of "
+                              "who asked. A browser set to use its own \"secure DNS\" goes around this.",
+                              indent=True))
+
+        v.addSpacing(6)
+        v.addWidget(self.heading("Is a site being blocked?", f))
+        row = QHBoxLayout()
+        self.ask = QLineEdit()
+        self.ask.setPlaceholderText("Type or paste the site's address, for example  www.someshop.com")
+        self.ask.returnPressed.connect(self.check)
+        row.addWidget(self.ask, 1)
+        check = QPushButton("Check")
+        check.clicked.connect(self.check)
+        row.addWidget(check)
+        v.addLayout(row)
+        self.answer = self.note("")
+        v.addWidget(self.answer)
+        self.allow_it = QPushButton("Always allow this site")
+        self.allow_it.clicked.connect(self.allow_found)
+        self.allow_it.hide()
+        v.addWidget(self.allow_it, 0, Qt.AlignLeft)
+
+        v.addSpacing(6)
+        v.addWidget(self.heading("Always allowed", f))
+        self.allow_note = self.note("")
+        v.addWidget(self.allow_note)
+        self.allowed = QListWidget()
+        self.allowed.setMaximumHeight(130)
+        self.allowed.itemSelectionChanged.connect(lambda: self.remove.setEnabled(bool(self.allowed.selectedItems())))
+        v.addWidget(self.allowed)
+        self.remove = QPushButton("Stop allowing the chosen site")
+        self.remove.setEnabled(False)
+        self.remove.clicked.connect(self.remove_allowed)
+        v.addWidget(self.remove, 0, Qt.AlignLeft)
+
+        v.addSpacing(6)
+        self.status = self.note("")
+        v.addWidget(self.status)
+        v.addWidget(self.note(blocker.CREDIT))
+        v.addStretch()
+
+        bar = QHBoxLayout()
+        bar.setContentsMargins(28, 8, 28, 18)
+        self.fetch = QPushButton(QIcon.fromTheme("view-refresh"), "Fetch the list now")
+        self.fetch.clicked.connect(lambda: self.helper(["update", "--force"], None, "Fetching the list…"))
+        bar.addWidget(self.fetch)
+        self.message = QLabel("")
+        self.message.setWordWrap(True)
+        bar.addWidget(self.message, 1)
+        self.save = QPushButton(QIcon.fromTheme("document-save"), "Save")
+        self.save.clicked.connect(self.save_now)
+        bar.addWidget(self.save)
+        close = QPushButton("Close")
+        close.clicked.connect(self.close)
+        bar.addWidget(close)
+        outer.addLayout(bar)
+        self.refresh()
+
+    # ---- small pieces ------------------------------------------------------------------------
+    @staticmethod
+    def bold(f):
+        b = QFont(f); b.setBold(True)
+        return b
+
+    def heading(self, text, f):
+        label = QLabel(text)
+        label.setFont(self.bold(f))
+        return label
+
+    def note(self, text, indent=False):
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setFont(self.font())               # a styled label doesn't take the window's bigger text
+        label.setStyleSheet("color: palette(placeholder-text);" + (" margin-left: 28px;" if indent else ""))
+        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        return label
+
+    # ---- what is on screen ---------------------------------------------------------------------
+    def wanted(self):
+        return blocker.clean_settings({"on": self.on.isChecked(), "safe_dns": self.dns.isChecked(),
+                                       "categories": {c: b.isChecked() for c, b in self.cats.items()},
+                                       "allow": self.allow})
+
+    def changed(self, *_):
+        dirty = self.wanted() != self.saved
+        self.save.setEnabled(dirty and self.proc is None)
+        if dirty and self.proc is None:
+            self.message.setText("Not saved yet.")
+        elif self.message.text() == "Not saved yet.":
+            self.message.setText("")
+        for box in self.cats.values():
+            box.setEnabled(self.on.isChecked())
+
+    def refresh(self):
+        state = self.core.state()
+        counts = state.get("counts") or {}
+        for cid, label in self.cat_notes.items():
+            n = counts.get(cid)
+            label.setText(label.property("what") + (f" ({n:,} sites)" if n else ""))
+        self.allowed.clear()
+        self.allowed.addItems(self.allow)
+        self.allowed.setVisible(bool(self.allow))
+        self.remove.setVisible(bool(self.allow))
+        self.allow_note.setText("These sites open even when the list has them." if self.allow else
+                                "No sites yet. Check a site above to add it here.")
+        if state.get("listed"):
+            text = (f"The list was last fetched on {when(state.get('fetched'))} and has {state['listed']:,} sites; "
+                    f"{state.get('blocked', 0):,} are blocked now. KantanOS fetches it again about once a week.")
+        else:
+            text = ("The list hasn't been fetched yet. KantanOS fetches it by itself a few minutes after the PC "
+                    "starts, when the internet is connected, or press \"Fetch the list now\".")
+        if state.get("error"):
+            text += " Last time: " + state["error"]
+        self.status.setText(text)
+        self.changed()
+
+    # ---- asking about one site -----------------------------------------------------------------
+    def check(self):
+        self.allow_it.hide()
+        self.found = None
+        typed = self.ask.text().strip()
+        if not typed:
+            self.answer.setText("")
+            return
+        hit = blocker.look_up(typed, self.names, self.wanted())
+        if hit is None:
+            self.answer.setText("That doesn't look like a site address. Try something like  www.someshop.com")
+            return
+        name, kinds = hit["name"], ", ".join(blocker.TITLES[c] for c in hit["inside_cats"])
+        if not self.names:
+            text = "The list hasn't been fetched yet, so nothing on it is being blocked."
+        elif hit["allowed"]:
+            text = f"{name} is on your always-allowed list, so the list doesn't block it."
+        elif hit["blocked"]:
+            text = f"Yes: {name} is blocked. It's on the list under \"{blocker.TITLES[hit['listed']]}\"."
+            self.found = name
+        elif hit["listed"]:
+            text = (f"{name} is on the list under \"{blocker.TITLES[hit['listed']]}\", but that kind of "
+                    "blocking is turned off, so it opens.")
+        elif hit["inside_blocked"]:
+            n = hit["inside_blocked"]
+            text = (f"{name} itself isn't blocked, but "
+                    + ("1 address that belongs to it is" if n == 1 else f"{n:,} addresses that belong to it are")
+                    + f" ({kinds}). If parts of the site don't work, you can allow the whole site.")
+            self.found = name
+        else:
+            text = (f"No: the list doesn't block {name}. If it still won't open, the safe look-up service may be "
+                    "refusing it. Turn that off, save, and try the site again; turn it back on afterwards.")
+        self.answer.setText(text)
+        if self.found:
+            self.allow_it.setText(f"Always allow {blocker.site_of(self.found)}")
+            self.allow_it.show()
+
+    def allow_found(self):
+        site = blocker.site_of(self.found or "")
+        if site and site not in self.allow:
+            self.allow = sorted(self.allow + [site])
+        self.allow_it.hide()
+        self.answer.setText(f"{site} will be allowed once you press Save.")
+        self.refresh()
+
+    def remove_allowed(self):
+        for item in self.allowed.selectedItems():
+            if item.text() in self.allow:
+                self.allow.remove(item.text())
+        self.refresh()
+
+    # ---- saving (asks for the password) --------------------------------------------------------
+    def save_now(self):
+        self.helper(["set"], json.dumps(self.wanted()), "Saving…")
+
+    def helper(self, args, payload, busy):
+        if self.proc is not None:
+            return
+        self.message.setText(busy)
+        self.save.setEnabled(False)
+        self.fetch.setEnabled(False)
+        self.proc = QProcess(self)
+        self.proc.finished.connect(self.helper_done)
+        self.proc.errorOccurred.connect(lambda _e: self.helper_done(1))
+        self.proc.start("pkexec", [APPLY] + args)
+        if payload is not None:
+            self.proc.write(payload.encode())
+        self.proc.closeWriteChannel()
+
+    def helper_done(self, code, *_):
+        proc, self.proc = self.proc, None
+        if proc is None:
+            return
+        err = bytes(proc.readAllStandardError()).decode(errors="replace").strip()
+        proc.deleteLater()
+        self.fetch.setEnabled(True)
+        if code in (126, 127):
+            text = "Nothing was changed: the password wasn't given."
+        elif code != 0 and not err:
+            text = "That didn't work. Nothing was changed."
+        else:
+            self.saved = self.core.settings()
+            self.allow = list(self.saved["allow"])
+            self.names, _ = self.core.names()
+            text = err.splitlines()[-1] if err else "Saved. Sites already open in a browser may need a minute, or the browser closed and opened again."
+        self.refresh()
+        self.message.setText(text)
+        if self.ask.text().strip():
+            self.check()
+
+
+def main():
+    if "--self-test" in sys.argv:
+        import tempfile
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        app = QApplication(sys.argv)
+        with tempfile.TemporaryDirectory() as root:
+            core = blocker.Blocker(root)
+            sample = ("#<malware-sites>\n0.0.0.0 bad-virus.example\n#</malware-sites>\n#<ad-sites>\n"
+                      "0.0.0.0 www.shareasale.com\n0.0.0.0 ads.shop.example\n#</ad-sites>\n"
+                      + "".join(f"0.0.0.0 filler{i}.example\n" for i in range(blocker.MIN_NAMES)))
+            assert core.update(opener=lambda u: (sample.encode(), blocker.LIST_URL))["error"] == ""
+            w = Window(core)
+            assert not w.save.isEnabled() and "sites)" in w.cat_notes["harm"].text()
+            w.ask.setText("https://www.shareasale.com/r.cfm?x=1")
+            w.check()
+            assert "Shop and deal links" in w.answer.text() and not w.allow_it.isHidden()
+            w.cats["shop"].setChecked(False)
+            w.check()
+            assert "turned off" in w.answer.text() and w.save.isEnabled()
+            w.ask.setText("shop.example")
+            w.check()
+            assert "1 address that" in w.answer.text() and w.found == "shop.example"
+            w.allow_found()
+            assert w.wanted()["allow"] == ["shop.example"] and w.allowed.count() == 1
+            w.check()
+            assert "always-allowed" in w.answer.text()
+            w.ask.setText("not a site")
+            w.check()
+            assert "doesn't look like" in w.answer.text()
+            w.on.setChecked(False)
+            assert not w.cats["harm"].isEnabled()
+        print("site blocker window self-test ok")
+        return
+    app = QApplication(sys.argv)
+    app.setApplicationName("kantanos-site-blocker")
+    app.setDesktopFileName("kantanos-site-blocker")
+    w = Window()
+    w.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

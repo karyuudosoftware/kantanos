@@ -434,6 +434,28 @@ Steps:
 - [x] Security: strict KantanOS firewall zone (only phone link, game streaming, device
       discovery and file sharing reachable; `ujust kantan-firewall`), ClamAV with "Scan for
       viruses" in Files and Welcome → Tools.
+- [x] Block bad sites (Welcome → Tools, `/usr/libexec/kantanos/site-blocker`): two layers, each
+      with its own switch, both on from the start. **The list:** the PC fetches Dan Pollock's
+      hosts list (someonewhocares.org/hosts, free for non-commercial use, credited in the
+      window) itself, a couple of minutes after start-up and then about weekly
+      (`kantanos-site-blocker.timer`), and writes the names into its own marked part of
+      `/etc/hosts`; the family's own lines are kept. Only site names are taken from the
+      download and every blocking line is written by KantanOS, so a tampered list can't send a
+      real site elsewhere; a download from the wrong address or with too few names is refused
+      and the last good copy stays; KantanOS's own update and app addresses are never blocked.
+      The list's sections are sorted into five kinds that can be turned off one by one:
+      viruses, scams and fake sites; shock sites; tracking and spying; adverts and spam; shop
+      and deal links (the click-through services sponsored results and deal emails pass
+      through, 83 names). An "always allow" list, and "Is a site being blocked?" to check an
+      address and allow it. **Safe look-up service:** systemd-resolved asks Quad9 (over TLS
+      when it can), which refuses known virus and scam sites, including ones too new for the
+      list. Changes need an administrator's password (asked once, kept a few minutes), so the
+      blocker can't be switched off by whoever is at the PC. `ujust kantan-block-sites`.
+      Tested in the image: real fetch (13,116 names), each switch, the allow list, everything
+      off puts `/etc/hosts` back exactly; Quad9 refused its own test site through
+      systemd-resolved. **To check on a real PC:** the password prompt from the window, and
+      Firefox, which in some countries sends look-ups to its own partner and so goes around the
+      safe look-up service (the list still applies); a Firefox setting could close that gap.
 - [ ] Lite edition for small PCs (Azulle Access 3 class). Last in the order of work.
 
 ## Working setup

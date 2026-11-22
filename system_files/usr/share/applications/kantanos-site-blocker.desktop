@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Block Bad Sites
+Comment=Keep this PC away from sites known for viruses, scams, tracking and adverts
+Keywords=block;sites;hosts;malware;virus;adverts;ads;tracking;safe;dns;parental;shopping;
+Exec=/usr/libexec/kantanos/site-blocker
+Icon=security-high
+Categories=Settings;Security;

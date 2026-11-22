@@ -217,6 +217,23 @@ kantan-set-location PLACE="":
     sudo systemctl restart geoclue 2>/dev/null || true
     echo "Done. Weather apps use this location from now on (restart any that are open)."
 
+# Block bad sites: "status" (what is blocked), "update" (fetch the list now) or "window" (settings)
+kantan-block-sites ACTION="status":
+    #!/usr/bin/bash
+    case "{{ ACTION }}" in
+        update) sudo /usr/libexec/kantanos/site-blocker-apply update --force >/dev/null && echo "The list is up to date." ;;
+        window) nohup setsid /usr/libexec/kantanos/site-blocker >/dev/null 2>&1 & ;;
+        *)
+            /usr/libexec/kantanos/site-blocker-apply status | jq -r '
+                "Blocking sites on the list: \(if .settings.on then "on" else "off" end)",
+                "Sites on the list: \(.state.listed // 0), blocked now: \(.state.blocked // 0)",
+                "Kinds turned off: \([.settings.categories | to_entries[] | select(.value | not) | .key] | join(", ") | if . == "" then "none" else . end)",
+                "Always allowed: \(.settings.allow | join(", ") | if . == "" then "none" else . end)",
+                "Safe look-up service (Quad9): \(if .settings.safe_dns then "on" else "off" end)"'
+            echo "Change these in Welcome → Tools → Block bad sites, or: ujust kantan-block-sites window"
+            ;;
+    esac
+
 # Firewall: "strict" (KantanOS, the normal setting) or "open" (Fedora's, every port above 1024)
 kantan-firewall STATE="status":
     #!/usr/bin/bash

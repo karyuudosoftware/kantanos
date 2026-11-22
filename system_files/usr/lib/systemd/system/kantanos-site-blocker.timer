@@ -1,0 +1,12 @@
+[Unit]
+Description=KantanOS: keep the bad-site list fresh
+
+# Runs soon after start-up and a few times a day. The list itself is only fetched when the
+# copy on this PC is about a week old (or missing), so most runs just check and finish.
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=6h
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

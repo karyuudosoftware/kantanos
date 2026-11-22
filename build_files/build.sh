@@ -291,6 +291,12 @@ systemctl enable kantanos-drive-label.service
 # Starter apps (browser, viewers, media player) are installed on first boot.
 systemctl enable kantanos-flatpak-setup.service
 
+# Block bad sites: the PC fetches Dan Pollock's list (someonewhocares.org/hosts) itself, soon
+# after start-up and then about weekly, and writes the names into its own part of /etc/hosts;
+# the safe look-up service (Quad9) is set in the same step. Both are on until someone turns
+# them off in Welcome → Tools → Block bad sites (/usr/libexec/kantanos/site-blocker).
+systemctl enable kantanos-site-blocker.timer
+
 gtk-update-icon-cache -f /usr/share/icons/hicolor || true
 
 ### 5. Boot splash ------------------------------------------------------------

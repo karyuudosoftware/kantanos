@@ -166,6 +166,8 @@ doc += screen("Tools", "Disk space and system helpers", "".join([
            "nohup setsid /usr/libexec/kantanos/backup --setup >&/dev/null"),
     action("virusscan", "Scan Downloads for viruses", "Checks your Downloads folder with ClamAV. To check anything else, right-click it in Files and choose Scan for viruses.",
            "nohup setsid /usr/libexec/kantanos/virus-scan >&/dev/null"),
+    action("siteblock", "Block bad sites", "KantanOS keeps this PC away from sites known for viruses, scams, tracking and adverts, in every browser. Here you can turn off one kind of blocking (for example shop and deal links), always allow a site you trust, or check why a site won't open. Changes need the PC's password.",
+           "nohup setsid /usr/libexec/kantanos/site-blocker >&/dev/null"),
     action("fixdock", "Dock or screen missing?", "Puts the dock back, and lists the screens KantanOS sees (an AV receiver on HDMI can count as a screen). To pick the main screen, run: ujust kantan-main-screen",
            f"ujust kantan-reset-dock; ujust kantan-display-info; {PAUSE}"),
 ]) + "".join(app(*a) for a in TOOLS))

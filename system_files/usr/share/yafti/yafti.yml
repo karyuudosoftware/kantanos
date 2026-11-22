@@ -433,6 +433,11 @@ screens:
         description: "Checks your Downloads folder with ClamAV. To check anything else, right-click it in Files and choose Scan for viruses."
         default: false
         script: "nohup setsid /usr/libexec/kantanos/virus-scan >&/dev/null"
+      - id: "siteblock"
+        title: "Block bad sites"
+        description: "KantanOS keeps this PC away from sites known for viruses, scams, tracking and adverts, in every browser. Here you can turn off one kind of blocking (for example shop and deal links), always allow a site you trust, or check why a site won't open. Changes need the PC's password."
+        default: false
+        script: "nohup setsid /usr/libexec/kantanos/site-blocker >&/dev/null"
       - id: "fixdock"
         title: "Dock or screen missing?"
         description: "Puts the dock back, and lists the screens KantanOS sees (an AV receiver on HDMI can count as a screen). To pick the main screen, run: ujust kantan-main-screen"

@@ -1,0 +1,11 @@
+[Unit]
+Description=KantanOS: fetch the bad-site list and block those sites
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/kantanos/site-blocker-apply update
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes

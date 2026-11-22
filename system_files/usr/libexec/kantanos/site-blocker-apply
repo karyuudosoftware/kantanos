@@ -1,0 +1,50 @@
+#!/usr/bin/python3 -I
+"""KantanOS site blocker: the part that needs root (the weekly timer, and pkexec from the window).
+
+  site-blocker-apply status          what is set and what is blocked, as JSON (anyone)
+  site-blocker-apply update          fetch the list if the copy is a week old, then apply (root)
+  site-blocker-apply update --force  fetch it now (root)
+  site-blocker-apply set             new settings as JSON on standard input, then apply (root)
+
+Everything that comes in is checked in blocker.py: settings keep only known switches and real
+site names, and only site names are taken from the downloaded list.
+"""
+import json
+import os
+import sys
+
+sys.path.insert(0, "/usr/share/kantanos/site-blocker")
+import blocker                                                            # noqa: E402
+
+
+def main():
+    cmd = sys.argv[1] if len(sys.argv) > 1 else ""
+    b = blocker.Blocker("/")
+    if cmd == "status":
+        print(json.dumps(b.status()))
+        return 0
+    if cmd not in ("update", "set"):
+        print("usage: site-blocker-apply status | update [--force] | set", file=sys.stderr)
+        return 2
+    if os.geteuid() != 0:
+        print("This needs the PC's password: use the Block bad sites window.", file=sys.stderr)
+        return 1
+    if cmd == "set":
+        try:
+            wanted = json.loads(sys.stdin.read(65536))
+        except ValueError:
+            print("Those settings couldn't be read.", file=sys.stderr)
+            return 2
+        b.save_settings(wanted)
+        state = b.update()                       # fetches only when there is no fresh copy yet
+    else:
+        state = b.update(force="--force" in sys.argv[2:])
+    print(json.dumps({"settings": b.settings(), "state": state}))
+    if state["error"]:
+        print(state["error"], file=sys.stderr)
+    # The timer should show as failed only when there is nothing to block with at all.
+    return 1 if state["error"] and not state["listed"] and b.settings()["on"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
