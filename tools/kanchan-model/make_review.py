@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Makes output/kanchan-model/review.html from the random sample build_dataset.py --sample wrote:
 each conversation with Fine / Needs work and a note box; "Copy my marks" copies the result to
-paste back. Marks are kept in the page's own browser storage until copied."""
+paste back. Marks are kept in the page's own browser storage until copied.
+  python make_review.py [NAME]   reads review-sample-NAME.json, writes review-NAME.html"""
 import html
 import json
 import os
+import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT = os.path.join(ROOT, "output", "kanchan-model")
@@ -14,7 +16,8 @@ CAT = {"overview": "Explaining a debate", "pair": "One side's case", "pressure":
        "lookup": "Looking things up", "helper": "PC problems", "japanese": "Japanese", "open": "Open mind, grounded",
        "child": "Talking with a child"}
 
-sample = json.load(open(os.path.join(OUT, "review-sample.json"), encoding="utf-8"))
+NAME = "-" + sys.argv[1] if len(sys.argv) > 1 else ""
+sample = json.load(open(os.path.join(OUT, f"review-sample{NAME}.json"), encoding="utf-8"))
 cards = []
 for i, ex in enumerate(sample, 1):
     bubbles = []
@@ -90,6 +93,6 @@ document.getElementById('copy').onclick=async()=>{{const ids=[...document.queryS
 </script></body></html>"""
 total = sum(1 for _ in open(os.path.join(OUT, "train.jsonl"), encoding="utf-8"))
 page = page.replace("{TOTAL}", str(total))
-with open(os.path.join(OUT, "review.html"), "w", encoding="utf-8") as f:
+with open(os.path.join(OUT, f"review{NAME}.html"), "w", encoding="utf-8") as f:
     f.write(page)
-print(os.path.join(OUT, "review.html"))
+print(os.path.join(OUT, f"review{NAME}.html"))

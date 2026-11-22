@@ -379,9 +379,19 @@ Steps:
       exports the picture-reading part (`--mmproj`, 854 MB, unchanged by training) and the
       Modelfile has a second `FROM` for it; her "how someone looks" notes match plain Gemma's.
       The model also writes Recipe book recipes as well as plain Gemma, so a PC with her model
-      doesn't need plain Gemma too. **Round 4, next:** how different countries see a topic
-      (the weakest area), what a law says with no debate added, Japanese "which party?" without
-      labels, and the owner's review marks. Later: the same training on a ~4B Gemma for Lite.
+      doesn't need plain Gemma too.
+      **Round 4** (`data/r4-*.jsonl`, 616 examples): how different countries or two sides see a
+      topic, what a law says with no debate added, Japanese "which party?" without labels.
+      Each test run twice (3 answers a question each time): fairness 90 and 101 of 105 (round
+      3: 99 and 100), world check 24 and 21 of 30 (round 3: 24 and 21). So rounds 3 and 4 are
+      level, and one run moves by about 10 points on fairness and 3 on the world check: a
+      single run can't rank two rounds. Round 4 is the installed `kanchan`; round 3 is kept as
+      `kanchan-v3`. Still weak: Article 9 gets "its interpretation has changed" added (and is
+      sometimes misquoted), and how Japan, China and Korea remember the war. Known grader
+      mistake: "According to Wikipedia, 7 November 2028" is marked as false balance.
+      **Next:** the owner's review marks (`make_review.py`), then a bigger test (more questions
+      or more repeats) before any further round. Later: the same training on a ~4B Gemma for
+      Lite.
 
 - [x] AI-made shortcuts on the "What would you like to do?" screen: "Add shortcut" → "Tell me
       what it's for" ("watch Netflix", "play Portal", "homework in Google Docs", Japanese too).
