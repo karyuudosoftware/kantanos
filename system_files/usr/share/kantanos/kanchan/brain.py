@@ -25,6 +25,9 @@ SENSITIVE = re.compile(
     r"tor(y|ies)|socialis|communis|fascis|left[- ]wing|right[- ]wing|leftist|maga|woke|politic|"
     r"religio|church|mosque|synagogue|pray|atheis|diagnos|illness|disease|medication|therapy|"
     r"pregnan|password|passcode|pin\b|bank|salary|debt|credit card)\w*")
+# Notes she never keeps, even when asked: a password manager is the place for these.
+SECRET = re.compile(r"(?i)\b(passwords?|passcodes?|pins?(?: number| code)?|card numbers?|account numbers?|"
+                    r"sort codes?|security codes?|cvv)\b|パスワード|暗証番号|口座番号")
 PLAN = re.compile(r"(?i)\b(next (week|month|year|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
                   r"tomorrow|tonight|this (weekend|week)|(january|february|march|april|june|july|august|"
                   r"september|october|november|december)|(mon|tues|wednes|thurs|fri|satur|sun)day)\b|"
@@ -509,7 +512,7 @@ def grounded(note, said):
 
 def keep_note(note, said):
     """Only notes that come from what was said, and sensitive ones only when asked outright."""
-    if not grounded(note, said):
+    if not grounded(note, said) or SECRET.search(note):
         return False
     return bool(EXPLICIT.search(said)) or not SENSITIVE.search(note)
 

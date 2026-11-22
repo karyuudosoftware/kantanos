@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.join(ROOT, "system_files", "usr", "share", "kantanos"
 import brain  # noqa: E402
 
 CATS = {"overview", "pair", "pressure", "fact", "own-view", "world", "local", "everyday", "memory", "lookup",
-        "helper", "japanese", "open"}
+        "helper", "japanese", "open", "child"}
 JA = re.compile(r"[぀-ヿ㐀-鿿]")
 # Never in her own voice (RULES 2-4): a lean, a vote, a settled fact made into a debate
 BANNED = [r"\bI (?:personally )?(?:think|believe|feel) (?:that )?(?:the )?(?:left|right|conservatives?|liberals?|"

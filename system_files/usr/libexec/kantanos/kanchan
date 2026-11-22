@@ -1180,6 +1180,9 @@ class Companion(QWidget):
         self.in_thread("chat", self.run_ai, ep, self.messages(private))
 
     def without_ai(self, text, intent):
+        if intent and intent[0] == "remember" and brain.SECRET.search(intent[1]):
+            return self.answer({"reply": "I'd rather not keep passwords or numbers like that. "
+                                         "A password manager is the safe place for them."}, keep=False)
         if intent and intent[0] == "remember":
             self.note(self.mem.add(intent[1]))
             return self.answer({"reply": "Got it, I'll remember that."}, keep=False)
@@ -1917,6 +1920,7 @@ def self_test():
     assert brain.parse('{"reply": "x", "recipe": " lasagne  for 4 "}')["recipe"] == "lasagne for 4"
     assert brain.parse('{"reply": "x", "recipe": ["rm"]}')["recipe"] is None
     assert not brain.keep_note("Votes for the Green party", "I vote Green")
+    assert not brain.keep_note("Wifi password is sunflower22", "Remember my wifi password is sunflower22")
     assert "impartial" in brain.personality("Kan-chan", "Sam")
     import datetime
     soon = datetime.datetime.now() + datetime.timedelta(days=1)

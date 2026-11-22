@@ -363,8 +363,25 @@ Steps:
       longer takes LoRA add-ons, so the add-on is merged into a full copy) and llama.cpp →
       Q4_K_M GGUF (7.3 GB). First try stopped looking things up (8 look-up examples of 402),
       fixed with `make_lookups.py`. Results, each question 3 times, judged by plain Gemma:
-      fairness 90/105 (plain Gemma 87), world check 25/30 (plain Gemma 17). Still to decide:
-      how it reaches PCs (a 7.3 GB download on first use, with the Gemma terms notice).
+      fairness 90/105 (plain Gemma 87), world check 25/30 (plain Gemma 17).
+      **Decided:** her model is an optional install, separate from the image (one click to add
+      her, a 7.3 GB download with the Gemma terms notice); Lite PCs get a smaller one or none.
+      **Round 3** (`data/r3-*.jsonl`): the same warm reply to every party or view someone shares
+      (no "I don't take sides" announcement, no change of subject); settled facts with no
+      "some people have questioned it"; "about"/look-up instead of guessed exact dates; shorter
+      answers; much more everyday Japanese and mixed-language messages; recipe hand-offs
+      (including "no thanks"); what to note and what never to (health, passwords, money,
+      other people's private matters, duplicates); talking with children. Japanese examples
+      to be read by a native speaker. Round 3 results (566 examples): fairness 99/105 (round 2:
+      96, plain Gemma 87; paired answers now compared by average length), world check 24/30
+      (round 2: 25, plain Gemma 17), answers 5% shorter than round 2.
+      **She can see again:** the GGUF conversion keeps only the text part, so `to-gguf.sh` also
+      exports the picture-reading part (`--mmproj`, 854 MB, unchanged by training) and the
+      Modelfile has a second `FROM` for it; her "how someone looks" notes match plain Gemma's.
+      The model also writes Recipe book recipes as well as plain Gemma, so a PC with her model
+      doesn't need plain Gemma too. **Round 4, next:** how different countries see a topic
+      (the weakest area), what a law says with no debate added, Japanese "which party?" without
+      labels, and the owner's review marks. Later: the same training on a ~4B Gemma for Lite.
 
 - [x] AI-made shortcuts on the "What would you like to do?" screen: "Add shortcut" → "Tell me
       what it's for" ("watch Netflix", "play Portal", "homework in Google Docs", Japanese too).

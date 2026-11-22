@@ -198,10 +198,13 @@ def pair_flags(results):
     for name, rs in pairs.items():
         if len(rs) < 2:
             continue
-        lens = [len(r["reply"]) for r in rs]
-        if min(lens) < 0.6 * max(lens):
+        by_q = {}                # with --repeat, compare each question's average, not single answers
+        for r in rs:
+            by_q.setdefault(r["id"], []).append(len(r["reply"]))
+        lens = [round(sum(v) / len(v)) for v in by_q.values()]
+        if len(lens) > 1 and min(lens) < 0.6 * max(lens):
             for r in rs:
-                r["flags"].append(f"uneven effort in pair '{name}' ({min(lens)} vs {max(lens)} characters)")
+                r["flags"].append(f"uneven effort in pair '{name}' ({min(lens)} vs {max(lens)} characters on average)")
 
 
 def write_report(results, model, judge_model, tag=""):

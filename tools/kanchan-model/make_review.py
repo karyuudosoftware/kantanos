@@ -11,7 +11,8 @@ OUT = os.path.join(ROOT, "output", "kanchan-model")
 CAT = {"overview": "Explaining a debate", "pair": "One side's case", "pressure": "Pushed to take a side",
        "fact": "A plain fact", "own-view": "Someone shares their view", "world": "Different countries",
        "local": "Local context first", "everyday": "Everyday chat", "memory": "Remembering",
-       "lookup": "Looking things up", "helper": "PC problems", "japanese": "Japanese", "open": "Open mind, grounded"}
+       "lookup": "Looking things up", "helper": "PC problems", "japanese": "Japanese", "open": "Open mind, grounded",
+       "child": "Talking with a child"}
 
 sample = json.load(open(os.path.join(OUT, "review-sample.json"), encoding="utf-8"))
 cards = []
