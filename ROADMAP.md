@@ -456,6 +456,21 @@ Steps:
       systemd-resolved. **To check on a real PC:** the password prompt from the window, and
       Firefox, which in some countries sends look-ups to its own partner and so goes around the
       safe look-up service (the list still applies); a Firefox setting could close that gap.
+- [ ] Idea, later: an optional **Health notebook** tied to Kan-chan. One profile per person
+      (for example a parent). Explains a condition, a medicine or a word from a letter in plain
+      words; reads blood test results from a photo or PDF into dated values with simple charts
+      over time, marking values outside the lab's own range without saying what that means;
+      keeps a list of questions for the next appointment; suggests food that fits the person's
+      own cuisine (for example Guyanese dishes with less salt or sugar) through the Recipe
+      book; uses Kan-chan's reminders for medicines. Rules: she only summarises, and every
+      answer points to the doctor; she never diagnoses, never says a result is fine or
+      dangerous, never suggests changing a dose; urgent signs get "call the emergency number"
+      first; each value read from a picture is shown beside the original and saved only once a
+      person confirms it (a local AI can misread numbers). Health details stay on the PC and
+      never go into web look-ups. Encrypted on the drive: unlocked by the person's login (KDE
+      wallet) by default, with an optional separate password that can't be recovered if
+      forgotten (backups are already encrypted). Before shipping: health-explaining examples
+      in Kan-chan's training and a health test like the fairness one.
 - [ ] Lite edition for small PCs (Azulle Access 3 class). Last in the order of work.
 
 ## Working setup
