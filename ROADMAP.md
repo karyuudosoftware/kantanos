@@ -116,6 +116,16 @@ is the owner's call; wait for the sketches before changing anything).
       the Mac with a real ROM, C64 and MSX.
 - [x] **Anti-cheat games:** "Windows" tile on the start screen (only on PCs with Windows), app
       menu entry and Welcome → Games: Windows starts once (firmware BootNext), no password.
+- [ ] **Anti-cheat games on KantanOS itself** (Easy Anti-Cheat for Linux, version 2): a game
+      checks how the PC started: Secure Boot on, a system core signed with a key Epic trusts,
+      TPM 2.0, and only signed drivers. KantanOS uses Bazzite's signed core, so whether it
+      qualifies is up to Bazzite (Universal Blue) and Epic, not us; when they agree it arrives
+      with the daily update. We never use another system's signed core or anything else to get
+      around the check. Ours to do: a "Can this PC play anti-cheat games?" check in Welcome →
+      Games that runs Bazzite's `ujust check-anticheat` and explains each result in plain
+      words, with a step-by-step guide for the one-time setup (Secure Boot on in the PC's
+      start-up settings, adding the Universal Blue key once, TPM on). Watch for Epic switching
+      it on (Fortnite expected first). Until then the "Windows" tile stays the way to play.
 - [ ] **Remote:** air-mouse remote support, including its voice button. Parked until the
       G20S remote has been bought: its buttons have to be read on the real PC.
 
@@ -456,6 +466,15 @@ Steps:
       systemd-resolved. **To check on a real PC:** the password prompt from the window, and
       Firefox, which in some countries sends look-ups to its own partner and so goes around the
       safe look-up service (the list still applies); a Firefox setting could close that gap.
+- [ ] **What's new** screen: after an update that matters, a window opens once and says in plain
+      words what changed, what it means for you, and what (if anything) you need to do, for
+      example "Some online games with anti-cheat can now run on this PC. You need to do one
+      thing first: …". Notes are written by us, by hand, in the repository, one per change
+      worth knowing about; the small daily fixes from Fedora and Bazzite stay silent so the
+      window doesn't become something people click away. Can be opened again from Welcome.
+      Also the plain-words "what KantanOS does and doesn't do" page for a public release:
+      updates are automatic and can be undone; whether a game runs is up to its makers;
+      one-time steps the person does themselves.
 - [ ] Idea, later: an optional **Health notebook** tied to Kan-chan. One profile per person
       (for example a parent). Explains a condition, a medicine or a word from a letter in plain
       words; reads blood test results from a photo or PDF into dated values with simple charts
