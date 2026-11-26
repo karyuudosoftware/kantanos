@@ -107,12 +107,19 @@ def http(method, url, data=None, token=None, form=False, timeout=10):
 
 
 def is_home_assistant(url, timeout=5):
-    """True when Home Assistant answers at this address (its sign-in methods list)."""
-    try:
-        r = http("GET", url + "/auth/providers", timeout=timeout)
-    except HAError:
-        return False
-    return isinstance(r, (list, dict))
+    """True when Home Assistant answers at this address: its sign-in methods list, or (a brand
+    new one, since 2026.11 refuses that list with 400 "onboarding_required" until its first
+    account exists) its welcome steps list."""
+    for path in ("/auth/providers", "/api/onboarding"):
+        try:
+            r = http("GET", url + path, timeout=timeout)
+        except HAError as e:
+            if e.kind == "offline":
+                return False                       # nothing there (yet): no point asking twice
+            continue
+        if isinstance(r, (list, dict)):
+            return True
+    return False
 
 
 def needs_onboarding(url):
