@@ -1,0 +1,11 @@
+[Unit]
+Description=KantanOS: notice new downloads, to check them for viruses
+Documentation=file:///usr/libexec/kantanos/virus-scan
+
+# Off until the person turns it on (Welcome → Tools → Check new downloads for viruses)
+[Path]
+PathChanged=%h/Downloads
+Unit=kantanos-virus-watch.service
+
+[Install]
+WantedBy=default.target

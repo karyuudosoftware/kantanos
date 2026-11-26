@@ -1,13 +1,131 @@
 #!/usr/bin/bash
 # KantanOS: scans files or folders for viruses with ClamAV and shows the result.
-# Files → right-click → "Scan for viruses", or run it with no arguments for Downloads.
-# Anything found can be moved to a quarantine folder that nothing can open.
+#   virus-scan [file or folder…]   Files → right-click → "Scan for viruses"; no arguments: Downloads
+#   virus-scan --new-downloads     scans only what arrived in Downloads since last time; says
+#                                  nothing unless a virus is found (kantanos-virus-watch.path)
+#   virus-scan --auto-setting      turns automatic scanning of new downloads on or off
+#   virus-scan --quarantine        shows quarantined files and can put them back
+# Anything found can be moved to a quarantine folder that nothing can open. Nothing is ever
+# deleted: virus scanners sometimes flag a safe file by mistake, so it can be put back.
 set -u
 TITLE="Virus scan"
 QUARANTINE="${XDG_DATA_HOME:-$HOME/.local/share}/kantanos/quarantine"
-[ $# -gt 0 ] || set -- "$HOME/Downloads"
+DOWNLOADS="$(xdg-user-dir DOWNLOAD 2>/dev/null || echo "$HOME/Downloads")"
+[ "$DOWNLOADS" = "$HOME" ] && DOWNLOADS="$HOME/Downloads"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/kantanos"
+STAMP="$STATE/virus-watch.stamp"        # new downloads = newer than this
+WATCH=kantanos-virus-watch.path
+NL=$'\n'
 
-if ! ls /var/lib/clamav/*.c[lv]d >/dev/null 2>&1; then
+have_list() {
+    ls /var/lib/clamav/*.c[lv]d >/dev/null 2>&1
+}
+
+# Asks about the files in $found ("path<TAB>virus name" lines) and quarantines them on yes
+report() {
+    local list msg
+    list=$(printf '%s\n' "$found" | awk -F'\t' '{n=$1; sub(".*/", "", n); print "• " n "   (" $2 ")"}')
+    msg=$(printf '%s\n\n%s\n\n%s' "$1" "$list" "Move them to quarantine? They can't be opened there, and nothing else is changed. Now and then a safe file is flagged by mistake: if you trust where it came from, you can put it back later (Welcome → Tools → Virus quarantine).")
+    if kdialog --title "$TITLE" --yes-label "Move to quarantine" --no-label "Leave them" --warningyesno "$msg"; then
+        mkdir -p "$QUARANTINE" && chmod 700 "$QUARANTINE"
+        printf '%s\n' "$found" | cut -f1 | while IFS= read -r f; do
+            dest="$QUARANTINE/$(date +%Y%m%d-%H%M%S)-$(basename -- "$f")"
+            mv -- "$f" "$dest" && chmod 000 "$dest"
+        done
+        kdialog --title "$TITLE" --msgbox "Moved to quarantine. To see them or put one back: Welcome → Tools → Virus quarantine."
+    fi
+}
+
+# Unfinished downloads: browsers write to these first, then rename the finished file
+unfinished() {
+    case "$1" in
+        *.part|*.crdownload|*.download|*.tmp|*.partial|*.opdownload|.~lock.*) return 0 ;;
+    esac
+    return 1
+}
+
+new_downloads() {
+    [ -d "$DOWNLOADS" ] && have_list || exit 0
+    mkdir -p "$STATE"
+    [ -e "$STAMP" ] || { touch "$STAMP"; exit 0; }     # first run: only what arrives from now on
+    while :; do
+        start=$(date +%s)
+        mapfile -d '' items < <(find "$DOWNLOADS" -mindepth 1 -maxdepth 1 -newer "$STAMP" -print0)
+        files=()
+        for f in "${items[@]}"; do
+            unfinished "$(basename -- "$f")" || files+=("$f")
+        done
+        [ ${#files[@]} -gt 0 ] || { touch -d "@$start" "$STAMP"; exit 0; }
+        # Wait until they stop growing (a copy or an unpacked archive may still be arriving)
+        for _ in 1 2 3 4 5 6; do
+            a=$(du -sb -- "${files[@]}" 2>/dev/null); sleep 5
+            b=$(du -sb -- "${files[@]}" 2>/dev/null)
+            [ "$a" = "$b" ] && break
+        done
+        touch -d "@$start" "$STAMP"
+        # Known viruses only: the guesswork checks ("Heuristics.…") cause most false alarms
+        found=$(nice -n 10 ionice -c 3 clamscan --recursive --infected --no-summary --stdout \
+                    --heuristic-alerts=no -- "${files[@]}" 2>/dev/null \
+                | grep -E ': .+ FOUND$' | sed -E 's/: (.+) FOUND$/\t\1/')
+        [ -n "$found" ] && report "A new download contains a known virus:"
+        # Anything that arrived during the scan? Go round again.
+        [ -n "$(find "$DOWNLOADS" -mindepth 1 -maxdepth 1 -newer "$STAMP" -print -quit)" ] || exit 0
+    done
+}
+
+auto_setting() {
+    if systemctl --user -q is-enabled "$WATCH" 2>/dev/null; then
+        kdialog --title "$TITLE" --yes-label "Turn off" --no-label "Keep it on" --yesno \
+            "New downloads are checked for viruses automatically. You only hear about it when a virus is found.${NL}${NL}Turn this off?" \
+            && systemctl --user disable --now "$WATCH" \
+            && kdialog --title "$TITLE" --msgbox "Turned off. You can still check anything by right-clicking it in Files and choosing Scan for viruses."
+    else
+        kdialog --title "$TITLE" --yes-label "Turn on" --no-label "Not now" --yesno \
+            "Check new downloads for viruses automatically?${NL}${NL}Each time something finishes downloading, it is checked with ClamAV. You only hear about it when a virus is found.${NL}${NL}Each check uses about 1 GB of memory for 10–20 seconds, which can briefly slow down an older PC." \
+            || exit 0
+        mkdir -p "$STATE" && touch "$STAMP"
+        systemctl --user enable --now "$WATCH" \
+            && kdialog --title "$TITLE" --msgbox "Turned on. New downloads are now checked automatically." \
+            || kdialog --title "$TITLE" --sorry "It couldn't be turned on."
+    fi
+}
+
+quarantine() {
+    mapfile -t q < <(find "$QUARANTINE" -mindepth 1 -maxdepth 1 2>/dev/null | sort)
+    if [ ${#q[@]} -eq 0 ]; then
+        kdialog --title "$TITLE" --msgbox "The quarantine is empty."
+        exit 0
+    fi
+    args=()
+    for f in "${q[@]}"; do
+        n=$(basename -- "$f")
+        args+=("$f" "${n:16}   (quarantined ${n:6:2}/${n:4:2}/${n:0:4})" off)
+    done
+    mapfile -t pick < <(kdialog --title "$TITLE" --separate-output --checklist \
+        "These files were flagged as viruses and can't be opened.${NL}Only put a file back if you trust where it came from: it goes back to Downloads." \
+        "${args[@]}")
+    [ ${#pick[@]} -gt 0 ] || exit 0
+    names=$(for f in "${pick[@]}"; do n=$(basename -- "$f"); echo "• ${n:16}"; done)
+    kdialog --title "$TITLE" --yes-label "Put back" --no-label "Cancel" --warningyesno \
+        "Put these back in Downloads, where they can be opened again?${NL}${NL}$names" || exit 0
+    mkdir -p "$DOWNLOADS"
+    for f in "${pick[@]}"; do
+        n=$(basename -- "$f"); dest="$DOWNLOADS/${n:16}"
+        [ -e "$dest" ] && dest="$DOWNLOADS/${n:0:15}-${n:16}"
+        chmod 600 -- "$f" && mv -- "$f" "$dest"
+    done
+    touch "$STAMP" 2>/dev/null       # not scanned again straight away
+    kdialog --title "$TITLE" --msgbox "Put back in Downloads."
+}
+
+case "${1:-}" in
+    --new-downloads) new_downloads; exit 0 ;;
+    --auto-setting) auto_setting; exit 0 ;;
+    --quarantine) quarantine; exit 0 ;;
+esac
+
+[ $# -gt 0 ] || set -- "$DOWNLOADS"
+if ! have_list; then
     kdialog --title "$TITLE" --sorry "The list of known viruses hasn't downloaded yet. It downloads by itself while the PC is online; try again in a few minutes."
     exit 1
 fi
@@ -23,16 +141,7 @@ rm -f "$log"
 if [ "$rc" -eq 0 ]; then
     kdialog --title "$TITLE" --msgbox "No viruses found in $what."
 elif [ "$rc" -eq 1 ] && [ -n "$found" ]; then
-    list=$(printf '%s\n' "$found" | awk -F'\t' '{print "• " $1 "   (" $2 ")"}')
-    msg=$(printf 'These files contain known viruses:\n\n%s\n\nMove them to quarantine? They can'"'"'t be opened there, and nothing else is changed.' "$list")
-    if kdialog --title "$TITLE" --yes-label "Move to quarantine" --no-label "Leave them" --warningyesno "$msg"; then
-        mkdir -p "$QUARANTINE" && chmod 700 "$QUARANTINE"
-        printf '%s\n' "$found" | cut -f1 | while IFS= read -r f; do
-            dest="$QUARANTINE/$(date +%Y%m%d-%H%M%S)-$(basename -- "$f")"
-            mv -- "$f" "$dest" && chmod 000 "$dest"
-        done
-        kdialog --title "$TITLE" --msgbox "Moved to quarantine ($QUARANTINE)."
-    fi
+    report "These files contain known viruses:"
 else
     kdialog --title "$TITLE" --sorry "The scan could not finish (some files may not be readable)."
 fi

@@ -1,0 +1,11 @@
+[Unit]
+Description=KantanOS: check new downloads for viruses (ClamAV)
+Documentation=file:///usr/libexec/kantanos/virus-scan
+
+[Service]
+Type=oneshot
+# Downloads often arrive several at a time: wait a little, then check them together
+ExecStartPre=/usr/bin/sleep 10
+ExecStart=/usr/libexec/kantanos/virus-scan --new-downloads
+Nice=10
+IOSchedulingClass=idle
