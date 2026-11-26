@@ -7,12 +7,16 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT=/root/kantan-iso
 rm -rf "$OUT" && mkdir -p "$OUT"
 bash "$HERE/make-iso-config.sh" "$OUT/config.toml"
-podman run --rm --privileged --pull=newer \
+# The builder is pinned: its 24 Nov 2026 release names the system by its own ID ("bazzite-45")
+# and refuses it ("requested repository not found"). This one (9 Nov 2026) builds it. Upstream
+# has stopped work on this builder; Bazzite itself now makes its ISOs with Titanoboa.
+BIB=quay.io/centos-bootc/bootc-image-builder@sha256:dab86ee6b46dcade411b37f4e70b07d93b6a06da0dbfec6fe89247a220e0d9f8
+podman run --rm --privileged \
     --security-opt label=type:unconfined_t \
     -v "$OUT":/output \
     -v "$OUT/config.toml":/config.toml:ro \
     -v /var/lib/containers/storage:/var/lib/containers/storage \
-    quay.io/centos-bootc/bootc-image-builder:latest \
+    "$BIB" \
     --type anaconda-iso --rootfs btrfs \
     "$LOCAL_IMAGE:latest" > /root/iso.log 2>&1 || { tail -40 /root/iso.log; exit 1; }
 DEST="$HERE/../../output/iso"
