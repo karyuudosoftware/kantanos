@@ -494,6 +494,14 @@ Steps:
       Also the plain-words "what KantanOS does and doesn't do" page for a public release:
       updates are automatic and can be undone; whether a game runs is up to its makers;
       one-time steps the person does themselves.
+- [ ] **Updates with a progress window**: checking for updates (`ujust kantan-update`, Welcome,
+      or the daily automatic one when someone is watching) shows a small window instead of the
+      raw terminal output (lines of `{"bytes":…,"description":"Pulling Image: sha256:…"}`):
+      a progress bar from those same numbers, in plain words what's happening ("Downloading
+      the new KantanOS: 1.2 GB of 1.7 GB", "Getting apps' updates", "Updating Steam games"),
+      and at the end "Restart to finish" or "Already up to date". Cancel stops it safely;
+      nothing changes until the restart. The daily background one stays silent apart from
+      a "Restart to finish" notice.
 - [ ] Idea, later: an optional **Health notebook** tied to Kan-chan. One profile per person
       (for example a parent). Explains a condition, a medicine or a word from a letter in plain
       words; reads blood test results from a photo or PDF into dated values with simple charts
