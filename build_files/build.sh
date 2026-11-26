@@ -288,6 +288,10 @@ systemctl enable kantanos-boot-entry.service
 # The system drive is called "KantanOS" in Files, not the installer's label "root" (once).
 systemctl enable kantanos-drive-label.service
 
+# On a screen whose best picture is bigger than 1080p, the first picture is 1080p (the person can
+# pick 4K in Display settings). Stops a black login screen on older PCs with 4K TVs.
+systemctl enable kantanos-safe-picture.service
+
 # Starter apps (browser, viewers, media player) are installed on first boot.
 systemctl enable kantanos-flatpak-setup.service
 

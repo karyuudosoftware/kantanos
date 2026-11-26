@@ -1,0 +1,348 @@
+#!/usr/bin/python3
+"""KantanOS safe picture: on a big screen, the first picture is 1080p.
+
+Some TVs and monitors say their best picture is 4K. An older PC can't always send that, and
+then the login screen and desktop (KWin) show nothing at all: seen on a 6th-generation Intel
+PC (HD Graphics 530, HDMI) with a 4K Sony TV, where KWin crashed while choosing a picture.
+
+So for each plugged-in screen (not a laptop's own screen) whose best picture is bigger than
+1920x1080, KantanOS gives Linux a copy of the screen's own description (its EDID) in which
+1920x1080 at 60 is marked as the best picture. Everything else in the description stays,
+including the other pictures (4K too) and the sound details, so sound over HDMI still works
+and the person can pick 4K in System Settings → Display; the desktop remembers that choice
+for that screen. Screens that are 1080p or smaller, very wide screens and screens that don't
+list 1080p at 60 are left as they are.
+
+The copies are made fresh at every start (before the login screen) and whenever a screen is
+plugged in, and live in /run, so nothing is kept on the drive.
+
+  safe-picture             look at the screens and set the copies (run as root by
+                           kantanos-safe-picture.service)
+  safe-picture --status    show what it would do and what is in use
+  safe-picture --self-test
+"""
+import fcntl
+import glob
+import hashlib
+import json
+import os
+import subprocess
+import sys
+
+FW_DIR = "/run/kantanos/firmware"
+EDID_DIR = FW_DIR + "/edid"
+STATE = "/run/kantanos/safe-picture.json"
+DRM = "/sys/class/drm"
+FW_PATH_PARAM = "/sys/module/firmware_class/parameters/path"
+EDID_PARAM = "/sys/module/drm/parameters/edid_firmware"
+BUILT_IN = ("eDP", "LVDS", "DSI")          # a laptop's own screen: never touched
+HEADER = bytes.fromhex("00ffffffffffff00")
+# 1920x1080 at 60 (CTA-861 timing 16): 148.5 MHz, 2200x1125 total, both syncs positive
+DTD_1080P = bytes.fromhex("023a801871382d40582c4500")
+I2C_SLAVE = 0x0703
+
+
+def log(text):
+    print(text, flush=True)
+
+
+# ---------------------------------------------------------------------------------- EDID
+
+def valid(edid):
+    return len(edid) >= 128 and edid[:8] == HEADER and sum(edid[:128]) % 256 == 0
+
+
+def timing(edid, at):
+    """(width, height, refresh) of the detailed timing at byte `at`, or None."""
+    d = edid[at:at + 18]
+    clock = d[0] | d[1] << 8
+    if len(d) < 18 or clock == 0:
+        return None
+    w = d[2] | (d[4] & 0xF0) << 4
+    h = d[5] | (d[7] & 0xF0) << 4
+    htotal = w + (d[3] | (d[4] & 0x0F) << 8)
+    vtotal = h + (d[6] | (d[7] & 0x0F) << 8)
+    if not htotal or not vtotal:
+        return None
+    return w, h, round(clock * 10000 / (htotal * vtotal))
+
+
+def preferred(edid):
+    return timing(edid, 54)
+
+
+def detailed_timings(edid):
+    """Every detailed timing in the base block and in CTA-861 extension blocks."""
+    out = [t for t in (timing(edid, at) for at in (54, 72, 90, 108)) if t]
+    for block in range(1, len(edid) // 128):
+        b = edid[block * 128:(block + 1) * 128]
+        if b[0] == 0x02 and 4 <= b[2] < 127:
+            at = block * 128 + b[2]
+            while at + 18 <= (block + 1) * 128 - 1:
+                t = timing(edid, at)
+                if not t:
+                    break
+                out.append(t)
+                at += 18
+    return out
+
+
+def cta_vics(edid):
+    """Video codes listed in CTA-861 extension blocks (16 = 1920x1080 at 60)."""
+    vics = set()
+    for block in range(1, len(edid) // 128):
+        b = edid[block * 128:(block + 1) * 128]
+        if b[0] != 0x02 or b[2] < 4:
+            continue
+        at = 4
+        while at < min(b[2], 127):
+            tag, length = b[at] >> 5, b[at] & 0x1F
+            if tag == 2:                                  # video data block
+                for code in b[at + 1:at + 1 + length]:
+                    vic = code & 0x7F if code & 0x7F <= 64 else code
+                    vics.add(vic)
+            at += 1 + length
+    return vics
+
+
+def lists_1080p60(edid):
+    if 16 in cta_vics(edid):
+        return True
+    if any(w == 1920 and h == 1080 and 59 <= r <= 61 for w, h, r in detailed_timings(edid)):
+        return True
+    for at in range(38, 54, 2):                           # standard timings: 1920 wide, 16:9, 60
+        if edid[at] == 0xD1 and edid[at + 1] == 0xC0:
+            return True
+    return False
+
+
+def needs_copy(edid):
+    """Why this screen gets a 1080p-first copy, or None to leave it alone."""
+    if not valid(edid):
+        return None
+    best = preferred(edid)
+    if not best:
+        return None
+    w, h, _ = best
+    if w <= 1920 and h <= 1080:
+        return None
+    if not 1.70 <= w / h <= 1.90:                        # very wide or squarish: keep its own
+        return None
+    if not lists_1080p60(edid):
+        return None
+    return f"best picture {w}x{h} is bigger than 1920x1080"
+
+
+def copy_1080p(edid):
+    """The screen's EDID with 1920x1080 at 60 as the first (best) picture."""
+    e = bytearray(edid)
+    e[54:66] = DTD_1080P                 # keep bytes 66-68: the screen's own size in mm
+    e[69:72] = b"\x00\x00\x1e"           # no border, digital separate sync, both positive
+    e[127] = -sum(e[:127]) % 256
+    return bytes(e)
+
+
+def same_screen(a, b):
+    """Same make, model and serial number (EDID bytes 8-17)."""
+    return len(a) >= 18 and len(b) >= 18 and a[8:18] == b[8:18]
+
+
+# ------------------------------------------------------------------------------ screens
+
+def connectors():
+    """{name: sysfs path} for every external connector, e.g. {"HDMI-A-1": ...}."""
+    out = {}
+    for path in sorted(glob.glob(DRM + "/card[0-9]*-*")):
+        name = os.path.basename(path).split("-", 1)[1]
+        if not name.startswith(BUILT_IN) and os.path.exists(path + "/status"):
+            out[name] = path
+    return out
+
+
+def read(path, mode="r"):
+    try:
+        with open(path, mode) as f:
+            return f.read()
+    except OSError:
+        return b"" if "b" in mode else ""
+
+
+def ddc_edid(path):
+    """The screen's real EDID, read straight from the screen (DDC), or b"" if that fails.
+
+    Needed when a copy is already in use on that connector: Linux then reports the copy."""
+    ddc = os.path.realpath(path + "/ddc") if os.path.exists(path + "/ddc") else ""
+    bus = os.path.basename(ddc)
+    if not bus.startswith("i2c-"):
+        return b""
+    dev = "/dev/" + bus
+    if not os.path.exists(dev):
+        subprocess.run(["modprobe", "i2c-dev"], capture_output=True)
+    try:
+        fd = os.open(dev, os.O_RDWR)
+    except OSError:
+        return b""
+    try:
+        fcntl.ioctl(fd, I2C_SLAVE, 0x50)
+        data = b""
+        for offset in (0, 128):
+            os.write(fd, bytes([offset]))
+            data += os.read(fd, 128)
+            if offset == 0 and (not valid(data) or data[126] == 0):
+                break
+        return data
+    except OSError:
+        return b""
+    finally:
+        os.close(fd)
+
+
+def current_params():
+    """{connector: firmware file} from Linux's edid_firmware setting."""
+    out = {}
+    for item in read(EDID_PARAM).strip().split(","):
+        if ":" in item:
+            conn, fw = item.split(":", 1)
+            out[conn] = fw
+    return out
+
+
+def plan():
+    """{connector: {"reason", "file", "data"}} for the screens that get a copy now."""
+    params = current_params()
+    out = {}
+    for name, path in connectors().items():
+        ours = params.get(name, "").startswith("edid/kantanos-")
+        if ours:
+            old = read(os.path.join(FW_DIR, params[name]), "rb")
+            real = ddc_edid(path)
+            if not valid(real) or (read(path + "/status").strip() != "connected"):
+                # can't read the screen right now (or it's switched off): keep the copy, so a
+                # TV that is switched off and on again doesn't go black
+                if old:
+                    out[name] = {"reason": "kept", "file": params[name], "data": old}
+                continue
+        else:
+            if read(path + "/status").strip() != "connected":
+                continue
+            real = read(path + "/edid", "rb")
+        reason = needs_copy(real)
+        if reason:
+            data = copy_1080p(real)
+            fw = f"edid/kantanos-{name}-{hashlib.sha256(data).hexdigest()[:10]}.bin"
+            out[name] = {"reason": reason, "file": fw, "data": data}
+    return out
+
+
+def write_param(path, value):
+    with open(path, "w") as f:
+        f.write(value)
+
+
+def apply():
+    if os.geteuid() != 0:
+        sys.exit("safe-picture needs to run as root (kantanos-safe-picture.service does that)")
+    want = plan()
+    os.makedirs(EDID_DIR, exist_ok=True)
+    for item in want.values():
+        target = os.path.join(FW_DIR, item["file"])
+        if not os.path.exists(target):
+            with open(target, "wb") as f:
+                f.write(item["data"])
+    keep = {os.path.basename(i["file"]) for i in want.values()}
+    for old in glob.glob(EDID_DIR + "/kantanos-*.bin"):
+        if os.path.basename(old) not in keep:
+            os.remove(old)
+
+    params = current_params()
+    others = {c: f for c, f in params.items() if not f.startswith("edid/kantanos-")}
+    new = dict(others, **{c: i["file"] for c, i in want.items()})
+    changed = new != params
+    if want and read(FW_PATH_PARAM).strip() != FW_DIR:
+        write_param(FW_PATH_PARAM, FW_DIR)
+    if changed:
+        write_param(EDID_PARAM, ",".join(f"{c}:{f}" for c, f in sorted(new.items())))
+        # tell the desktop (and this service's own rule) to look at the screens again
+        for card in sorted(glob.glob(DRM + "/card[0-9]")):
+            try:
+                write_param(card + "/uevent", "change")
+            except OSError:
+                pass
+    with open(STATE, "w") as f:
+        json.dump({c: {"reason": i["reason"], "file": i["file"]} for c, i in want.items()},
+                  f, indent=1)
+    for c, i in sorted(want.items()):
+        log(f"{c}: 1920x1080 first ({i['reason']})")
+    if not want:
+        log("no screen needs a 1080p-first copy")
+    log("changed" if changed else "unchanged")
+
+
+def status():
+    log(f"in use: {current_params() or 'none'}")
+    for name, path in connectors().items():
+        st = read(path + "/status").strip()
+        edid = read(path + "/edid", "rb")
+        best = preferred(edid) if valid(edid) else None
+        log(f"{name}: {st}, best picture {best or '-'}")
+
+
+# ---------------------------------------------------------------------------- self-test
+
+def _block0(w, h, refresh, std=b""):
+    """A minimal valid EDID base block whose first timing is w x h."""
+    e = bytearray(128)
+    e[:8] = HEADER
+    e[8:18] = bytes.fromhex("4d d9 01 00 01 01 01 01 1d 22".replace(" ", ""))
+    e[18:20] = b"\x01\x03"
+    e[38:54] = (std + b"\x01\x01" * 8)[:16]
+    hb, vb = 280, 45
+    clock = round((w + hb) * (h + vb) * refresh / 10000)
+    e[54:72] = bytes([clock & 0xFF, clock >> 8, w & 0xFF, hb & 0xFF,
+                      (w >> 8) << 4 | hb >> 8, h & 0xFF, vb & 0xFF,
+                      (h >> 8) << 4 | vb >> 8, 88, 44, 0x45, 0, 0x64, 0x3b, 0x31, 0, 0, 0x1e])
+    return e
+
+
+def _with_cta(base, vics):
+    base[126] = 1
+    base[127] = -sum(base[:127]) % 256
+    ext = bytearray(128)
+    vdb = bytes([2 << 5 | len(vics)]) + bytes(vics)
+    audio = bytes([1 << 5 | 3, 0x09, 0x07, 0x07])          # an audio block (LPCM 2ch)
+    ext[0:4] = bytes([0x02, 0x03, 4 + len(vdb) + len(audio), 0x70])
+    ext[4:4 + len(vdb) + len(audio)] = vdb + audio
+    ext[127] = -sum(ext[:127]) % 256
+    return bytes(base) + bytes(ext)
+
+
+def self_test():
+    tv = _with_cta(_block0(3840, 2160, 60), [97, 16, 4, 31])     # 4K TV listing 1080p60
+    assert valid(tv) and preferred(tv)[:2] == (3840, 2160)
+    assert lists_1080p60(tv) and needs_copy(tv)
+    c = copy_1080p(tv)
+    assert valid(c) and preferred(c) == (1920, 1080, 60), preferred(c)
+    assert same_screen(c, tv) and c[128:] == tv[128:] and c[66:69] == tv[66:69]
+    assert needs_copy(c) is None                                   # a copy is left alone
+    assert 16 in cta_vics(c) and 97 in cta_vics(c)                 # 4K still listed
+    full_hd = _with_cta(_block0(1920, 1080, 60), [16])
+    assert needs_copy(full_hd) is None
+    assert needs_copy(_block0(1366, 768, 60)) is None              # small screen
+    assert needs_copy(_with_cta(_block0(3440, 1440, 60), [16])) is None   # very wide
+    assert needs_copy(_with_cta(_block0(3840, 2160, 60), [97])) is None   # no 1080p60
+    std = _block0(2560, 1440, 60, std=b"\xd1\xc0")                 # monitor: standard timing
+    std[127] = -sum(std[:127]) % 256
+    assert needs_copy(bytes(std))
+    broken = bytearray(tv)
+    broken[127] ^= 1
+    assert needs_copy(bytes(broken)) is None                       # bad checksum: untouched
+    log("ok")
+
+
+if __name__ == "__main__":
+    if "--self-test" in sys.argv:
+        self_test()
+    elif "--status" in sys.argv:
+        status()
+    else:
+        apply()

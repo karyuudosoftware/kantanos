@@ -1,7 +1,11 @@
 # Boots the KantanOS test disk in QEMU for Windows with hypervisor (WHPX) acceleration.
 # Headless: control it with qmp.py (tcp 4444) and serial.py (tcp 4445).
 #   -Audio   add a sound card (silent: its sound goes nowhere) for audio-setting tests
-param([string]$Cpu = 'max', [int]$Cpus = 8, [string]$Ram = '8G', [switch]$Audio)
+#   -Screen 2560x1440   the virtual screen reports this as its best picture (safe-picture tests;
+#                       QEMU puts 4K in a DisplayID block, so 2560x1440 is the useful test;
+#                       virtio-gpu ignores Linux's EDID override, so only the program's
+#                       own logic can be tested here, not the picture change)
+param([string]$Cpu = 'max', [int]$Cpus = 8, [string]$Ram = '8G', [switch]$Audio, [string]$Screen = '')
 $q = 'C:\Program Files\qemu'
 $d = 'D:\CLAUDE_Projects\kantanos\output\vm'
 if (-not (Test-Path "$d\vars.fd")) { Copy-Item "$q\share\edk2-i386-vars.fd" "$d\vars.fd" }
@@ -19,6 +23,7 @@ $a = @(
     "-chardev socket,id=ser0,host=127.0.0.1,port=4445,server=on,wait=off,logfile=$d\serial.log",
     '-serial chardev:ser0'
 )
+if ($Screen) { $w, $h = $Screen -split 'x'; $a = $a -replace 'virtio-vga,xres=1920,yres=1080', "virtio-vga,edid=on,xres=$w,yres=$h" }
 if ($Audio) { $a += '-audiodev none,id=snd0'; $a += '-device ich9-intel-hda'; $a += '-device hda-output,audiodev=snd0' }
 $a = $a -join ' '
 $p = Start-Process -FilePath "$q\qemu-system-x86_64.exe" -ArgumentList $a -PassThru -WindowStyle Hidden -RedirectStandardError "$d\qemu-err.txt"

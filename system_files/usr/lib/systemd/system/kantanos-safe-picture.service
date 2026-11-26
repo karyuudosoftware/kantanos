@@ -1,0 +1,12 @@
+[Unit]
+Description=KantanOS: on a big screen, start with a 1080p picture
+Documentation=file:///usr/libexec/kantanos/safe-picture
+After=systemd-udevd.service systemd-modules-load.service
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/kantanos/safe-picture
+
+[Install]
+WantedBy=multi-user.target

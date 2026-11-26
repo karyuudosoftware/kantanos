@@ -466,6 +466,25 @@ Steps:
       systemd-resolved. **To check on a real PC:** the password prompt from the window, and
       Firefox, which in some countries sends look-ups to its own partner and so goes around the
       safe look-up service (the list still applies); a Firefox setting could close that gap.
+- [x] **Safe picture** (`kantanos-safe-picture.service`, `/usr/libexec/kantanos/safe-picture`): on
+      a plugged-in screen whose best picture is bigger than 1920x1080 (not a laptop's own
+      screen, not very wide screens), the first picture is 1080p at 60; the person can pick 4K
+      in System Settings → Display and the desktop remembers it for that screen. Found on the
+      family's old PC (Intel Core i5-6400, HD Graphics 530, HDMI) with a 4K Sony TV, direct or
+      through the Onkyo: the TV's best picture (4K at 60) is more than that HDMI can send, and
+      KWin 6.8.3 then crashed while choosing a picture, so the login screen stayed black. How:
+      before the login screen and whenever a screen is plugged in, KantanOS gives Linux a copy
+      of the screen's own description (EDID) with 1080p at 60 marked as best; everything else
+      in it stays (other pictures, sound over HDMI). Copies live in `/run`, made fresh each
+      start; a copy already in use is checked against the screen itself (DDC) so a different
+      screen on the same socket gets its own. Tested: self-test, and in the test VM the
+      program's logic (virtio-gpu ignores the copy). **To check on a real PC:** the old PC,
+      after removing the by-hand fix (`rpm-ostree kargs --delete=firmware_class.path=/etc/firmware
+      --delete=drm.edid_firmware=HDMI-A-1:edid/tv.bin`, delete `/etc/firmware/edid/tv.bin`).
+      Still to do: report the crash to KDE; check newer KWin; a weak PC with a 4K TV plugged in
+      while the desktop is running could still crash before the copy is in place.
+      **Install guide note (older PCs):** on ASRock boards HDMI sound needs both "Onboard HD
+      Audio" and "Onboard HDMI HD Audio" enabled in the startup settings.
 - [ ] **What's new** screen: after an update that matters, a window opens once and says in plain
       words what changed, what it means for you, and what (if anything) you need to do, for
       example "Some online games with anti-cheat can now run on this PC. You need to do one
