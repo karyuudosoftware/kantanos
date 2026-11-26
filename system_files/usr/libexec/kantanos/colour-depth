@@ -1,0 +1,123 @@
+#!/usr/bin/python3
+"""KantanOS: 8-bit colour on Intel graphics for screens that can't do HDR, set once at login.
+
+The desktop picks 10-bit colour by itself when the screen offers it. On older Intel graphics
+(found on an i5-6400, Skylake, HDMI to a TV through an AV receiver) the desktop then fails
+to make the pictures it draws effects into ("Failed to create an offscreen framebuffer",
+"GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT", many times a minute), until a game makes it lock up
+with a black screen. 10-bit colour only helps HDR, so on a screen without HDR nothing is lost.
+
+Each screen is set once, and only while its colour depth is still "automatic": a choice the
+person makes in System Settings afterwards is kept.
+
+  colour-depth              check the screens (at login, kantanos-colour-depth.desktop)
+  colour-depth --self-test
+"""
+import glob
+import json
+import os
+import re
+import subprocess
+import sys
+
+STATE = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
+                     "kantanos", "colour-depth.json")
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def outputs(text):
+    """[{name, id, hdr_capable, automatic}] from `kscreen-doctor -o`."""
+    found = []
+    for block in re.split(r"(?m)^(?=Output: )", ANSI.sub("", text)):
+        head = re.match(r"Output: \d+ (\S+) (\S+)", block)
+        if not head or not re.search(r"(?m)^\s+connected\b", block):
+            continue
+        hdr = re.search(r"(?m)^\s+HDR: (\S+)", block)
+        depth = re.search(r"(?m)^\s+Color resolution: (.*)$", block)
+        found.append({"name": head.group(1), "id": head.group(2),
+                      "hdr_capable": bool(hdr) and hdr.group(1) != "incapable",
+                      "automatic": bool(depth) and depth.group(1).startswith("automatic")
+                      and not depth.group(1).startswith("automatic (8)")})
+    return found
+
+
+def driver(name):
+    """The graphics driver behind a screen connector, e.g. "i915" for HDMI-A-1."""
+    for link in glob.glob(f"/sys/class/drm/card*-{name}/device/driver"):
+        return os.path.basename(os.path.realpath(link))
+    return ""
+
+
+def todo(outs, drivers, done):
+    """Which screens get 8-bit colour now."""
+    return [o for o in outs if drivers.get(o["name"]) in ("i915", "xe") and not o["hdr_capable"]
+            and o["automatic"] and o["id"] not in done]
+
+
+def load_done():
+    try:
+        with open(STATE, encoding="utf-8") as f:
+            return set(json.load(f))
+    except (OSError, ValueError):
+        return set()
+
+
+def main():
+    if "--self-test" in sys.argv:
+        return self_test()
+    try:
+        text = subprocess.run(["kscreen-doctor", "-o"], capture_output=True, text=True, timeout=30,
+                              env=dict(os.environ, LC_ALL="C")).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return 0
+    outs = outputs(text)
+    done = load_done()
+    for o in todo(outs, {o["name"]: driver(o["name"]) for o in outs}, done):
+        r = subprocess.run(["kscreen-doctor", f"output.{o['name']}.maxbpc.8"], capture_output=True, timeout=30)
+        if r.returncode == 0:
+            done.add(o["id"])
+            print(f"colour-depth: {o['name']} set to 8-bit colour", file=sys.stderr)
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    with open(STATE, "w", encoding="utf-8") as f:
+        json.dump(sorted(done), f)
+    return 0
+
+
+SAMPLE = """Output: 1 HDMI-A-1 13d4653e-7ea7-4e5f-aa6c-2d239dcca964
+\tenabled
+\tconnected
+\tHDR: incapable
+\tColor resolution: automatic (10), range: [8; 12] bits per color
+Output: 2 DP-1 aaaa
+\tenabled
+\tconnected
+\tHDR: enabled
+\tColor resolution: automatic (10), range: [8; 12] bits per color
+Output: 3 HDMI-A-2 bbbb
+\tdisabled
+\tdisconnected
+\tHDR: incapable
+\tColor resolution: automatic (10)
+Output: 4 DP-2 cccc
+\tenabled
+\tconnected
+\tHDR: incapable
+\tColor resolution: 10, range: [8; 12] bits per color
+"""
+
+
+def self_test():
+    outs = outputs(SAMPLE)
+    assert [o["name"] for o in outs] == ["HDMI-A-1", "DP-1", "DP-2"], outs
+    assert outs[0] == {"name": "HDMI-A-1", "id": "13d4653e-7ea7-4e5f-aa6c-2d239dcca964",
+                       "hdr_capable": False, "automatic": True}, outs[0]
+    drivers = {"HDMI-A-1": "i915", "DP-1": "i915", "DP-2": "i915"}
+    # HDMI-A-1 only: DP-1 can do HDR, DP-2 was chosen by the person
+    assert [o["name"] for o in todo(outs, drivers, set())] == ["HDMI-A-1"]
+    assert todo(outs, drivers, {"13d4653e-7ea7-4e5f-aa6c-2d239dcca964"}) == []     # once per screen
+    assert todo(outs, {"HDMI-A-1": "amdgpu"}, set()) == []                         # Intel only
+    print("ok")
+
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)

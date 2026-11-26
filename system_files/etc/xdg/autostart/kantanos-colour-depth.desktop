@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=KantanOS colour depth
+Comment=8-bit colour on Intel graphics for screens without HDR (avoids a black-screen lock-up)
+Exec=/usr/libexec/kantanos/colour-depth
+X-KDE-autostart-phase=1
+NoDisplay=true
