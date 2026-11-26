@@ -1,0 +1,185 @@
+#!/usr/bin/python3
+"""KantanOS: a natural voice (Piper) for the screen reader and everything else that speaks
+through speech-dispatcher, instead of espeak-ng's robotic one.
+
+speech-dispatcher runs `piper-speech say` for each thing it says (module kantanos-piper,
+/etc/speech-dispatcher/modules/kantanos-piper.conf). Loading the voice takes about 2 seconds,
+so the first `say` starts `piper-speech serve`, which keeps it loaded and answers in about
+0.1 s. Playback stops at once when speech-dispatcher interrupts (it kills `say`; the player
+goes with it).
+
+If the voice hasn't been downloaded or anything goes wrong, it speaks with espeak-ng as
+before, so the screen reader is never silent.
+
+  piper-speech say [--rate N] [--pitch N]   text on stdin (N: -100..100, speech-dispatcher's scale)
+  piper-speech serve                         keep the voice loaded (started by say when needed)
+  piper-speech --download                    fetch the voice (about 60 MB; asks nothing)
+  piper-speech --self-test
+"""
+import ctypes
+import io
+import json
+import os
+import signal
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
+import wave
+
+VOICE = "en_US-hfc_female-medium"           # Kan-chan's old voice: clear, friendly, quick
+DATA = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")),
+                    "kantanos", "helper", "voices")      # shared with the Helper's Piper voices
+MODEL = os.path.join(DATA, VOICE + ".onnx")
+URL = ("https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/hfc_female/medium/"
+       + VOICE + ".onnx")
+SOCK = os.path.join(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"), "kantanos-piper.sock")
+IDLE = 30 * 60                               # the server leaves after 30 quiet minutes
+
+
+def ready():
+    return os.path.isfile(MODEL) and os.path.isfile(MODEL + ".json")
+
+
+def download():
+    os.makedirs(DATA, exist_ok=True)
+    for suffix in (".onnx.json", ".onnx"):
+        dest = MODEL.replace(".onnx", suffix)
+        urllib.request.urlretrieve(URL.replace(".onnx", suffix), dest + ".part")
+        os.replace(dest + ".part", dest)
+
+
+def speed(rate):
+    """speech-dispatcher's -100..100 to Piper's length scale (smaller is faster): x0.5 to x2."""
+    return 1 / (2 ** (max(-100, min(100, rate)) / 100))
+
+
+# ---- the server: the voice stays loaded --------------------------------------------------
+def serve():
+    from piper import PiperVoice, SynthesisConfig
+    voice = PiperVoice.load(MODEL)
+    try:
+        os.unlink(SOCK)
+    except OSError:
+        pass
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(SOCK)
+    os.chmod(SOCK, 0o600)
+    srv.listen(8)
+    srv.settimeout(IDLE)
+    while True:
+        try:
+            conn, _ = srv.accept()
+        except socket.timeout:
+            break
+        with conn:
+            try:
+                req = json.loads(conn.makefile("rb").readline() or b"{}")
+                buf = io.BytesIO()
+                with wave.open(buf, "wb") as w:
+                    voice.synthesize_wav(str(req.get("text", ""))[:4000], w,
+                                         SynthesisConfig(length_scale=speed(int(req.get("rate", 0)))))
+                conn.sendall(buf.getvalue())
+            except Exception:  # noqa: BLE001 - one bad request never stops the voice
+                pass
+    try:
+        os.unlink(SOCK)
+    except OSError:
+        pass
+
+
+def ask(text, rate):
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(20)
+    s.connect(SOCK)
+    s.sendall(json.dumps({"text": text, "rate": rate}).encode() + b"\n")
+    s.shutdown(socket.SHUT_WR)
+    data = b""
+    while chunk := s.recv(65536):
+        data += chunk
+    return data
+
+
+def wav_from_server(text, rate):
+    try:
+        return ask(text, rate)
+    except OSError:
+        pass
+    subprocess.Popen([sys.executable, os.path.abspath(__file__), "serve"], start_new_session=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for _ in range(100):                      # up to 10 s for the first load
+        time.sleep(0.1)
+        try:
+            return ask(text, rate)
+        except OSError:
+            continue
+    return b""
+
+
+def die_with_parent():
+    """For the player: when `say` is killed (speech interrupted), the sound stops too."""
+    try:
+        ctypes.CDLL("libc.so.6").prctl(1, signal.SIGKILL)       # PR_SET_PDEATHSIG
+    except OSError:
+        pass
+
+
+def play(wav):
+    p = subprocess.Popen(["pw-play", "-"], stdin=subprocess.PIPE, preexec_fn=die_with_parent,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        p.stdin.write(wav)
+        p.stdin.close()
+    except BrokenPipeError:
+        pass
+    return p.wait()
+
+
+def espeak(text, rate, pitch):
+    """The old voice, when the natural one isn't there."""
+    wpm = int(175 * 2 ** (rate / 100))
+    r = subprocess.run(["espeak-ng", "--stdout", "-s", str(wpm), "-p", str(50 + pitch // 2), text],
+                       capture_output=True)
+    return play(r.stdout) if r.returncode == 0 else 1
+
+
+def say(argv):
+    def number(flag):                         # speech-dispatcher writes them as "0.00"
+        try:
+            return int(float(argv[argv.index(flag) + 1]))
+        except (ValueError, IndexError):
+            return 0
+    rate = number("--rate") if "--rate" in argv else 0
+    pitch = number("--pitch") if "--pitch" in argv else 0
+    text = sys.stdin.read().strip()
+    if not text:
+        return 0
+    wav = wav_from_server(text, rate) if ready() else b""
+    if len(wav) > 44:
+        return play(wav)
+    return espeak(text, rate, pitch)
+
+
+def self_test():
+    assert abs(speed(0) - 1) < 1e-9 and abs(speed(100) - 0.5) < 1e-9 and abs(speed(-100) - 2) < 1e-9
+    assert abs(speed(500) - 0.5) < 1e-9
+    print("ok")
+
+
+def main():
+    args = sys.argv[1:]
+    if args[:1] == ["--self-test"]:
+        return self_test()
+    if args[:1] == ["--download"]:
+        return download()
+    if args[:1] == ["serve"]:
+        return serve()
+    if args[:1] == ["say"]:
+        return say(args)
+    print(__doc__)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)

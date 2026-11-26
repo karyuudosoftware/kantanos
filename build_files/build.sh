@@ -136,6 +136,13 @@ dnf5 -y install restic rclone
 # the person's own calendar links with icalendar (repeats worked out with dateutil).
 dnf5 -y install orca python3-icalendar python3-dateutil
 python3 -c "import icalendar, dateutil.rrule"
+# The screen reader speaks with the natural Piper voice (piper-speech, module kantanos-piper)
+# instead of espeak-ng's robotic one; espeak-ng stays as the fallback until the voice is there.
+sed -i '/^AddModule "espeak-ng"/i AddModule "kantanos-piper"            "sd_generic"   "kantanos-piper.conf"' \
+    /etc/speech-dispatcher/speechd.conf
+sed -i 's/^# *DefaultModule espeak-ng$/DefaultModule kantanos-piper/' /etc/speech-dispatcher/speechd.conf
+grep -q '^AddModule "kantanos-piper"' /etc/speech-dispatcher/speechd.conf
+grep -q '^DefaultModule kantanos-piper$' /etc/speech-dispatcher/speechd.conf
 
 # Letters and documents (/usr/bin/kantan-docs): reading scanned letters and photos of pages
 # (tesseract; its English and Japanese data are already in the base), PDFs with poppler.
@@ -304,6 +311,13 @@ with open(path, "w", encoding="utf-8") as fh:
     c.write(fh, space_around_delimiters=False)
 PY
 grep -q 'x-msi=kantanos-windows-program.desktop' /etc/xdg/mimeapps.list
+
+# Waydroid's own menu entry opens its "Initialize Waydroid" window, which asks for download
+# addresses nobody knows. Send it to KantanOS's Android setup instead (addresses filled in).
+sed -i -e 's|^Exec=waydroid$|Exec=kantan-android|' -e 's|^Exec=waydroid init --client$|Exec=kantan-android setup|' \
+    /usr/share/applications/Waydroid.desktop
+grep -q '^Exec=kantan-android$' /usr/share/applications/Waydroid.desktop
+grep -q '^Exec=kantan-android setup$' /usr/share/applications/Waydroid.desktop
 
 # Installed systems get the Windows-style local hardware clock once (the installer writes UTC).
 systemctl enable kantanos-local-clock.service

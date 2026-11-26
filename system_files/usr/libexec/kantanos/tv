@@ -11,6 +11,8 @@
   /, S, Search                            find a channel or show: "star trek*", "*news*" (* = anything, ? = one letter)
   Esc / Back                              close; press twice to leave
   Mouse: click for what's on, right-click for the guide, wheel to change channel, double-click for full screen.
+  In the guide: click the country (left or right half) for the other countries you chose; the
+  wheel over the left side scrolls the categories; Recordings and Settings are at the bottom.
 
 Channels and sorting: /usr/share/kantanos/tv/lineup.py. Guide: guide.py. Recordings: recorder.py
 and the kantanos-tv-recorder user service.
@@ -175,6 +177,7 @@ class Guide(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.shelves = []           # [(label, filter, indent)]
         self.shelf = 0
+        self.shelf_top = 0          # first line shown in the left pane (the wheel scrolls it)
         self.focus_left = False
         self.rows = []
         self.row = 0
@@ -185,6 +188,33 @@ class Guide(QWidget):
         f = self.font()
         f.setPointSizeF(f.pointSizeF() * 1.25)
         self.setFont(f)
+
+    def shelf_view(self, fm, follow=True):
+        """(first line shown, line height, lines that fit) for the left pane; with follow, the
+        selected line is kept in view."""
+        lh = int(fm.height() * 1.7)
+        fit = max(1, (self.height() - 40) // lh)
+        if follow:
+            if self.shelf < self.shelf_top:
+                self.shelf_top = self.shelf
+            elif self.shelf >= self.shelf_top + fit:
+                self.shelf_top = self.shelf - fit + 1
+        self.shelf_top = min(max(0, self.shelf_top), max(0, len(self.shelves) - fit))
+        return self.shelf_top, lh, fit
+
+    def switch_country(self, step):
+        cs = self.tv.lu.countries()
+        if len(cs) > 1:
+            i = (cs.index(self.country) + step) % len(cs) if self.country in cs else 0
+            self.country = cs[i]
+            self.build_shelves()
+            self.shelf = 0                           # stay on the country line (Right again: next)
+            self.shelf_top = 0
+            self.rows = self.channels_for({"country": self.country})   # its channels alongside
+            self.row = self.top = 0
+            self.cache.clear()
+            self.focus_left = True
+            self.update()
 
     @staticmethod
     def slot_floor(t):
@@ -214,16 +244,25 @@ class Guide(QWidget):
         sh = [("country", None, 0), ("🔍 Search…", {"search": True}, 0),
               ("★ Favourites", {"fav": True}, 0), ("Recently watched", {"recent": True}, 0),
               ("All channels", {"country": self.country}, 0)]
+        tail = [("⏺ Recordings", {"panel": "recordings"}, 0), ("⚙ Settings (countries, folder)", {"panel": "settings"}, 0)]
         for t, label, subs, n in lu.shelves(self.country):
             sh.append((f"{label}  ({n})", {"country": self.country, "topic": t}, 0))
             if len(subs) > 1 or (subs and subs[0][1] < n):
                 for s, k in subs:
                     sh.append((f"{s}  ({k})", {"country": self.country, "topic": t, "sub": s}, 1))
-        self.shelves = sh
-        self.shelf = min(self.shelf, len(sh) - 1) if self.shelf else 4
+        self.shelves = sh + tail
+        self.shelf = min(self.shelf, len(self.shelves) - 1) if self.shelf else 4
+
+    def open_panel(self, f):
+        """Recordings or Settings, from the guide's left pane."""
+        self.hide()
+        if f["panel"] == "settings":
+            self.tv.open_settings()
+        else:
+            self.tv.open_menu()
 
     def channels_for(self, f):
-        if f is None or f.get("search"):
+        if f is None or f.get("search") or f.get("panel"):
             return []
         if f.get("fav"):
             return [c for c in self.tv.lu.channels if c["key"] in self.tv.favs]
@@ -282,8 +321,8 @@ class Guide(QWidget):
         now = time.time()
         # shelves
         y = 20
-        lh = int(fm.height() * 1.7)
-        first = max(0, self.shelf - (self.height() - 60) // lh + 3)
+        first, lh, _fit = self.shelf_view(fm, follow=not getattr(self, "wheeling", False))
+        self.wheeling = False
         for i in range(first, len(self.shelves)):
             label, f, ind = self.shelves[i]
             if y > self.height() - lh:
@@ -420,13 +459,13 @@ class Guide(QWidget):
             self.shelf = max(0, self.shelf - 1)
         elif k == Qt.Key.Key_Down:
             self.shelf = min(len(self.shelves) - 1, self.shelf + 1)
-        elif self.shelves[self.shelf][1] is None and k in (Qt.Key.Key_Left, Qt.Key.Key_Right):
-            cs = self.tv.lu.countries()
-            if len(cs) > 1:
-                i = (cs.index(self.country) + (1 if k == Qt.Key.Key_Right else -1)) % len(cs)
-                self.country = cs[i]
-                self.build_shelves()
-                self.shelf = 0
+        elif self.shelves[self.shelf][1] is None and k in (Qt.Key.Key_Left, Qt.Key.Key_Right,
+                                                            Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Select):
+            self.switch_country(-1 if k == Qt.Key.Key_Left else 1)
+            return
+        elif (self.shelves[self.shelf][1] or {}).get("panel") and k in (
+                Qt.Key.Key_Right, Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Select):
+            self.open_panel(self.shelves[self.shelf][1])
             return
         elif k in (Qt.Key.Key_Right, Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Select):
             if self.rows:
@@ -486,12 +525,15 @@ class Guide(QWidget):
         fm, rh, left, name_w, head, foot, gx, gw, span = self.metrics()
         pos = e.position().toPoint()
         if pos.x() < left:
-            lh = int(fm.height() * 1.7)
-            first = max(0, self.shelf - (self.height() - 60) // lh + 3)
+            first, lh, _fit = self.shelf_view(fm, follow=False)
             i = first + (pos.y() - 20) // lh
             if 0 <= i < len(self.shelves):
-                if self.shelves[i][1] is None:
-                    self.keys_left(Qt.Key.Key_Right)
+                if self.shelves[i][1] is None:      # the country line: left half back, right half on
+                    self.switch_country(-1 if pos.x() < left // 2 else 1)
+                    return
+                elif self.shelves[i][1].get("panel"):
+                    self.open_panel(self.shelves[i][1])
+                    return
                 elif self.shelves[i][1].get("search"):
                     self.tv.open_search()
                     return
@@ -520,7 +562,12 @@ class Guide(QWidget):
 
     def wheelEvent(self, e):
         step = -1 if e.angleDelta().y() > 0 else 1
-        self.row = min(max(0, self.row + step * 3), max(0, len(self.rows) - 1))
+        fm, rh, left, *_rest = self.metrics()
+        if e.position().x() < left:                  # over the categories: scroll them
+            self.shelf_top += step * 2
+            self.wheeling = True
+        else:
+            self.row = min(max(0, self.row + step * 3), max(0, len(self.rows) - 1))
         self.update()
 
 
@@ -1443,8 +1490,38 @@ def self_test():
         key(Qt.Key.Key_Up)
     assert g.shelves[g.shelf][1] is None           # the country chooser
     key(Qt.Key.Key_Right)
-    assert g.country == "CA"
+    assert g.country == "CA" and g.rows and g.rows[0]["name"] == "Local Three"
+    key(Qt.Key.Key_Right)
+    assert g.country == "US" and g.shelves[g.shelf][1] is None   # Right again: the next country
     g.grab()
+    # the mouse: a click on the country line (right half) moves on, from any selected line
+    from PySide6.QtGui import QMouseEvent, QWheelEvent
+    from PySide6.QtCore import QPointF
+    g.shelf = 4
+    g.update()
+    fm, _rh, left, *_r = g.metrics()
+    first, lh, _fit = g.shelf_view(fm)
+    y = 20 + (0 - first) * lh + lh // 2
+    g.mousePressEvent(QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(left - 30, y), QPointF(left - 30, y),
+                                  Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier))
+    assert g.country == "CA", g.country
+    # the wheel over the left side scrolls the categories, not the channels
+    g.resize(1280, 260)
+    g.shelf, g.shelf_top = 0, 0
+    g.wheelEvent(QWheelEvent(QPointF(40, 100), QPointF(40, 100), QPoint(0, -120), QPoint(0, -120),
+                             Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False))
+    g.grab()
+    assert g.shelf_top > 0, g.shelf_top
+    g.resize(1280, 720)
+    # Settings and Recordings are in the left pane
+    labels = [s[0] for s in g.shelves]
+    assert any("Settings" in t for t in labels) and any("Recordings" in t for t in labels), labels
+    opened = []
+    host.open_settings = lambda: opened.append("settings")
+    g.shelf = next(i for i, s in enumerate(g.shelves) if (s[1] or {}).get("panel") == "settings")
+    g.focus_left = True
+    key(Qt.Key.Key_Return)
+    assert opened == ["settings"], opened
     for cls in (Recordings, Settings):
         p = cls(host)
         p.resize(1280, 720)

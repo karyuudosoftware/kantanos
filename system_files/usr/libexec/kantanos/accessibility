@@ -16,9 +16,9 @@ import re
 import subprocess
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QIcon
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFormLayout, QHBoxLayout, QLabel,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFormLayout, QHBoxLayout, QLabel, QMessageBox,
                                QPushButton, QVBoxLayout, QWidget)
 
 TITLE = "Easier to see and hear"
@@ -69,6 +69,15 @@ def set_reader(on):
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
         run("pkill", "-u", str(os.getuid()), "-x", "orca")
+
+
+NATURAL = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")),
+                       "kantanos", "helper", "voices", "en_US-hfc_female-medium.onnx")
+
+
+def natural_voice_ready():
+    """The screen reader's natural voice (Piper, /usr/libexec/kantanos/piper-speech) is here."""
+    return os.path.isfile(NATURAL) and os.path.isfile(NATURAL + ".json")
 
 
 # ---- sizes ---------------------------------------------------------------------------------
@@ -150,11 +159,15 @@ class Window(QWidget):
 
         self.reader = QCheckBox("Read the screen out loud (screen reader)")
         self.reader.setChecked(reader_on())
-        self.reader.toggled.connect(set_reader)
+        self.reader.toggled.connect(self.reader_toggled)
         v.addWidget(self.reader)
         v.addWidget(self.note("Turn it on or off from anywhere with Meta + Alt + S (Meta is the Windows-logo key). "
                               "It reads whatever you move to with the keyboard: Tab moves between things, and "
                               "Insert + Space opens its own settings (voice, speed)."))
+
+        self.voice_note = self.note("")
+        v.addWidget(self.voice_note)
+        self.show_voice_note()
 
         form = QFormLayout()
         form.setVerticalSpacing(12)
@@ -206,6 +219,39 @@ class Window(QWidget):
         row.addWidget(done)
         v.addLayout(row)
         v.addStretch()
+
+    def show_voice_note(self):
+        if natural_voice_ready():
+            self.voice_note.setText("It speaks with a natural voice.")
+        else:
+            self.voice_note.setText("Its voice is the older, robotic one until the natural voice has been "
+                                    "downloaded (about 60 MB; offered when you turn the screen reader on).")
+
+    def reader_toggled(self, on):
+        set_reader(on)
+        if not on or natural_voice_ready():
+            return
+        answer = QMessageBox.question(self, TITLE, "The screen reader can speak with a natural, easy-to-understand "
+                                      "voice instead of the robotic one. It runs on this PC and needs a one-time "
+                                      "download of about 60 MB (from the Piper voice library). Download it now?")
+        if answer != QMessageBox.Yes:
+            return
+        self.voice_note.setText("Downloading the natural voice… The screen reader uses it as soon as it's here.")
+        self.dl = subprocess.Popen(["/usr/libexec/kantanos/piper-speech", "--download"],
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.dl_timer = QTimer(self)
+        self.dl_timer.timeout.connect(self.download_check)
+        self.dl_timer.start(1000)
+
+    def download_check(self):
+        if self.dl.poll() is None:
+            return
+        self.dl_timer.stop()
+        if self.dl.returncode == 0 and natural_voice_ready():
+            self.show_voice_note()
+        else:
+            self.voice_note.setText("The natural voice didn't download (is the internet connected?). "
+                                    "Turn the screen reader off and on again to try again.")
 
     @staticmethod
     def note(text):
