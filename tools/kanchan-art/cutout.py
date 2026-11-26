@@ -57,6 +57,52 @@ def cut(img, tol=28):
     return out
 
 
+def holes(img, cutimg, protect=None, min_size=40):
+    """The paper showing through gaps the outline encloses (between an arm and her body,
+    under an umbrella): a mask of pixels to make see-through. Only pure, neutral white counts
+    (the paper is about 253 grey-free; white clothes are darker and a little blue), and
+    nothing inside `protect` (left, top, right, bottom: her head, where the glasses' shine
+    and the hair clip are pure white too)."""
+    a = np.asarray(img.convert("RGB")).astype(np.int16)
+    inside = np.asarray(cutimg.getchannel("A")) > 128
+    white = (a.min(axis=2) > 227) & ((a.max(axis=2) - a.min(axis=2)) < 22) & inside
+    h, w = white.shape
+    out = np.zeros((h, w), bool)
+    seen = np.zeros((h, w), bool)
+    for sy, sx in zip(*np.nonzero(white)):
+        if seen[sy, sx]:
+            continue
+        seen[sy, sx] = True
+        q, pts = deque([(sy, sx)]), []
+        while q:
+            y, x = q.popleft()
+            pts.append((y, x))
+            for ny, nx in ((y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)):
+                if 0 <= ny < h and 0 <= nx < w and white[ny, nx] and not seen[ny, nx]:
+                    seen[ny, nx] = True
+                    q.append((ny, nx))
+        if len(pts) < min_size:
+            continue
+        p = np.array(pts)
+        if protect:
+            cy, cx = p.mean(axis=0)
+            if protect[0] <= cx <= protect[2] and protect[1] <= cy <= protect[3]:
+                continue
+        m = a[p[:, 0], p[:, 1]].mean(axis=0)
+        if m.mean() >= 250 and abs(m[2] - m[0]) < 3:
+            out[p[:, 0], p[:, 1]] = True
+    return out
+
+
+def head_box(spec_face, frame_box_):
+    """Her face in the cut-out drawing (the frame's face box, given in 480x600 frame pixels).
+    A white patch whose middle is in it is the glasses' shine or the hair clip, not paper."""
+    bx0, by0, bx1, by1 = frame_box_
+    k = (bx1 - bx0) / W
+    fx0, fy0, fx1, fy1 = spec_face
+    return (int(bx0 + fx0 * k), int(by0 + fy0 * k), int(bx0 + fx1 * k), int(by0 + fy1 * k))
+
+
 def frame(cutimg, bust=0.5, box=None):
     """Head to chest (or as much of her as --bust says), centred on her head, 480x600.
     box: (left, top, height) in the drawing's own pixels, for pictures where the top of the

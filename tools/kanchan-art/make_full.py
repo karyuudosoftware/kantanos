@@ -44,7 +44,9 @@ def make(pack, name, spec):
     big = src.resize((int(src.width * s * SHARPER), int(src.height * s * SHARPER)), Image.LANCZOS).convert("RGBA")
     # pulled in by a pixel and softened, so no pale rim of the drawing's white paper shows on
     # a dark window
-    alpha = cut.getchannel("A").resize(big.size, Image.LANCZOS).filter(ImageFilter.MinFilter(5)) \
+    gaps = cutout.holes(small, cut, cutout.head_box(spec["face"], (bx0, by0, bx1, by1)))
+    solid = Image.fromarray(np.where(gaps, 0, np.asarray(cut.getchannel("A"))).astype(np.uint8))
+    alpha = solid.resize(big.size, Image.LANCZOS).filter(ImageFilter.MinFilter(5)) \
         .filter(ImageFilter.GaussianBlur(0.7))
     big.putalpha(alpha)
     ys, xs = np.nonzero(np.asarray(alpha) > 128)

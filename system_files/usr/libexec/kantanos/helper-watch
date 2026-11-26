@@ -21,7 +21,7 @@ import time
 HOME = os.path.expanduser("~")
 CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.join(HOME, ".config")), "kantanos", "helper.json")
 IGNORE_FILE = "/usr/share/kantanos/helper/watch-ignore"
-ICON = "/usr/share/kantanos/helper/characters/kan-chan/worried.svg"
+ICON = "/usr/share/kantanos/helper/kanchan-worried.png"    # her new head (tools/kanchan-art/make_icons.py)
 HELPER = "/usr/libexec/kantanos/helper"
 COREDUMP = "fc2e22bc6ee647b6b90729ab34a250b1"       # systemd-coredump: "process ... dumped core"
 UNIT_FAILED = "d9b373ed55a64feb8242e02dbe79a49c"    # systemd: "unit ... failed with result ..."
