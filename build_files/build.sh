@@ -261,6 +261,24 @@ for f in /usr/bin/yafti_gtk.py /usr/share/applications/io.github.ublue_os.yafti_
     sed -i -e 's|Bazzite Portal|KantanOS Welcome|g' -e 's|Comment=Helps you setup Bazzite|Comment=Helps you set up KantanOS|' -e 's|Icon=io.github.ublue_os.yafti_gtk|Icon=kantanos|' "$f"
 done
 sed -i -e '/^Name\[/d' -e '/^Comment\[/d' -e 's|^Keywords=.*|Keywords=kantanos;welcome;setup;apps;|' /usr/share/applications/io.github.ublue_os.yafti_gtk.desktop
+# Welcome ran every entry in a terminal window. KantanOS's entries all have their own windows
+# (install-window, task-window, update-window...), so run them directly; the one that needs a
+# terminal (Install Claude Code) opens its own.
+python3 - <<'PY'
+p = "/usr/bin/yafti_gtk.py"
+s = open(p, encoding="utf-8").read()
+old = '''    return [
+        "xdg-terminal-exec",
+        f"--app-id={APP_ID}",
+        f"--title={APP_TITLE}",
+        "--",
+        "bash",'''
+assert s.count(old) == 1, "yafti_gtk.py: terminal launcher not found"
+s = s.replace(old, '''    return [
+        "bash",''')
+open(p, "w", encoding="utf-8").write(s)
+PY
+grep -q 'xdg-terminal-exec' /usr/bin/yafti_gtk.py && ! grep -q '"xdg-terminal-exec",' /usr/bin/yafti_gtk.py
 
 # The file manager is simply called "Files" in menus and on the dock (English name only;
 # other languages keep their own translation). Its Explorer-style layout comes from

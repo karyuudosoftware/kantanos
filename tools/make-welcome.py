@@ -46,7 +46,9 @@ TOOLS = [
     ("org.gnome.World.PikaBackup", "Pika Backup", "Backups as often as every hour to the NAS or a USB drive, with older versions of every file to go back to."),
 ]
 
-PAUSE = 'echo; echo "Press Enter to close..."; read -r _'   # only for Claude Code (a programmer's tool)
+# Welcome runs every entry without a terminal (build.sh); Claude Code, a programmer's tool,
+# opens its own terminal and waits there.
+PAUSE = 'echo; echo "Press Enter to close..."; read -r _'
 
 
 def task(title, doing, done, command, failed="That didn't work.", show=False, ask="", restart=False):
@@ -77,10 +79,10 @@ def app(fid, name, desc):
         options:
           - id: "uninstall"
             label: {q(f"Install {name}")}
-            script: {q(f"kantan-app install {fid}")}
+            script: {q("/usr/libexec/kantanos/install-window install " + shlex.join([fid, "--name", name]))}
           - id: "remove-app"
             label: {q(f"Remove {name}")}
-            script: {q(f"kantan-app uninstall {fid}")}
+            script: {q("/usr/libexec/kantanos/install-window uninstall " + shlex.join([fid, "--name", name]))}
 """
 
 
@@ -179,7 +181,7 @@ doc += screen("Tools", "Disk space and system helpers", "".join([
     action("access", "Make the PC easier to see and hear", "Screen reader (reads the screen out loud), everything bigger, bigger text and mouse pointer, a magnifier. Kan-chan can also read your email out loud and remind you about appointments.",
            "nohup setsid /usr/libexec/kantanos/accessibility >&/dev/null"),
     action("claudecode", "Install Claude Code", "Claude's coding assistant for the terminal, from Anthropic's official installer. Needs a Claude account. It goes into your home folder, so updates to KantanOS don't affect it.",
-           f"curl -fsSL https://claude.ai/install.sh | bash; {PAUSE}"),
+           "xdg-terminal-exec -- bash -lc " + shlex.quote(f"curl -fsSL https://claude.ai/install.sh | bash; {PAUSE}")),
     action("backups", "Back up your files (recommended)", "Set it up once: choose a USB drive, your NAS, Google Drive or OneDrive, and your documents, photos, music and videos are backed up every 30 minutes, locked with your own backup key. Getting files back is in the same place.",
            "nohup setsid /usr/libexec/kantanos/backup --setup >&/dev/null"),
     action("virusscan", "Scan Downloads for viruses", "Checks your Downloads folder with ClamAV. To check anything else, right-click it in Files and choose Scan for viruses.",
