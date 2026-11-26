@@ -33,17 +33,22 @@ screens:
         title: "Connect your NAS"
         description: "Make the shared folders on your NAS (for example a TrueNAS box) work like normal folders in every app. Asks for the NAS user name and password once."
         default: false
-        script: "ujust kantan-nas-connect; echo; echo \"Press Enter to close...\"; read -r _"
+        script: "nohup setsid /usr/libexec/kantanos/nas-connect --window >&/dev/null"
       - id: "wake"
         title: "Wake this PC from another device"
         description: "Shows the details a wake-up app needs to switch this PC on over the network (Wake-on-LAN)."
         default: false
-        script: "ujust kantan-wake-info; echo; echo \"Press Enter to close...\"; read -r _"
+        script: "nohup setsid /usr/libexec/kantanos/task-window --title 'Wake this PC from another device' --doing 'Looking up this PC'\"'\"'s network details' --done 'Details for your wake-up app' --failed 'Wake-on-LAN needs a network cable' --show-output -- ujust kantan-wake-info >&/dev/null"
       - id: "update"
         title: "Check for updates"
         description: "Update KantanOS and your apps. A restart applies system updates; the previous version stays available as a fallback."
         default: false
-        script: "ujust update; echo; echo \"Press Enter to close...\"; read -r _"
+        script: "nohup setsid /usr/libexec/kantanos/update-window >&/dev/null"
+      - id: "undo-update"
+        title: "Undo the last update"
+        description: "If something stopped working after an update, go back to the version from before it. Takes effect when the PC restarts. Needs the PC's password."
+        default: false
+        script: "nohup setsid /usr/libexec/kantanos/task-window --title 'Undo the last update' --doing 'Getting the previous version ready' --done 'The previous version is ready. Restart the PC to go back to it.' --failed 'It couldn'\"'\"'t go back (the PC'\"'\"'s password wasn'\"'\"'t given, or there is no earlier version on this PC).' --ask 'Go back to the version of KantanOS from before the last update? Your files and apps stay as they are; only KantanOS itself goes back. This happens when the PC restarts.' --restart -- pkexec bootc rollback >&/dev/null"
       - id: "about"
         title: "About this PC"
         description: "Show the KantanOS version and system details."
@@ -324,7 +329,7 @@ screens:
         title: "Notepad++"
         description: "The Windows Notepad++ text editor, downloaded from its official page and installed in your Windows programs."
         default: false
-        script: "kantan-windows install-notepadpp; echo; echo \"Press Enter to close...\"; read -r _"
+        script: "nohup setsid /usr/libexec/kantanos/task-window --title Notepad++ --doing 'Downloading and installing Notepad++' --done 'Notepad++ is installed. It'\"'\"'s in the app menu.' --failed 'Notepad++ couldn'\"'\"'t be installed' -- kantan-windows install-notepadpp >&/dev/null"
       - id: "cdrive"
         title: "Open the C: drive"
         description: "Program Files and the other folders your Windows programs use. It is also in the Files sidebar as \"C: (Windows)\"."
@@ -450,9 +455,9 @@ screens:
         script: "nohup setsid /usr/libexec/kantanos/site-blocker >&/dev/null"
       - id: "fixdock"
         title: "Dock or screen missing?"
-        description: "Puts the dock back, and lists the screens KantanOS sees (an AV receiver on HDMI can count as a screen). To pick the main screen, run: ujust kantan-main-screen"
+        description: "Puts the dock back, and lists the screens KantanOS sees (an AV receiver on HDMI can count as a screen). To choose the main screen: System Settings → Display & Monitor."
         default: false
-        script: "ujust kantan-reset-dock; ujust kantan-display-info; echo; echo \"Press Enter to close...\"; read -r _"
+        script: "nohup setsid /usr/libexec/kantanos/task-window --title 'Dock or screen missing?' --doing 'Putting the dock back' --done 'The dock is back. These are the screens KantanOS sees:' --failed 'That didn'\"'\"'t work.' --show-output -- bash -c 'ujust kantan-reset-dock && ujust kantan-display-info' >&/dev/null"
       - id: "qdirstat"
         title: "QDirStat"
         description: "See which folders use the most space, as a sorted list (like TreeSize on Windows)."
@@ -508,17 +513,17 @@ screens:
         title: "Turn HDR on"
         description: "Enables HDR and wide colour on every connected display that supports it."
         default: false
-        script: "ujust kantan-hdr-on; echo; echo \"Press Enter to close...\"; read -r _"
+        script: "nohup setsid /usr/libexec/kantanos/task-window --title 'Turn HDR on' --doing 'Turning HDR on' --done 'HDR is on for every screen that supports it.' --failed 'That didn'\"'\"'t work.' --show-output -- ujust kantan-hdr-on >&/dev/null"
       - id: "hdr-off"
         title: "Turn HDR off"
         description: "Switches every display back to standard colour."
         default: false
-        script: "ujust kantan-hdr-off; echo; echo \"Press Enter to close...\"; read -r _"
+        script: "nohup setsid /usr/libexec/kantanos/task-window --title 'Turn HDR off' --doing 'Turning HDR off' --done 'HDR is off.' --failed 'That didn'\"'\"'t work.' -- ujust kantan-hdr-off >&/dev/null"
       - id: "audio-71"
         title: "Use 7.1 surround over HDMI"
         description: "For an AV receiver. Turn the receiver on first. Heights are added by the receiver's upmixer."
         default: false
-        script: "ujust kantan-audio-71; echo; echo \"Press Enter to close...\"; read -r _"
+        script: "nohup setsid /usr/libexec/kantanos/task-window --title '7.1 surround' --doing 'Switching the sound to 7.1 surround' --done 'The sound is now 7.1 surround.' --failed '7.1 surround isn'\"'\"'t available' --show-output -- ujust kantan-audio-71 >&/dev/null"
       - id: "atmos"
         title: "Films with Dolby Atmos"
         description: "Open films with \"Movie Player (Dolby Atmos)\" (right-click a film → Open With). It sends Dolby Atmos, TrueHD and DTS sound untouched to the receiver, like PotPlayer's pass-through on Windows."

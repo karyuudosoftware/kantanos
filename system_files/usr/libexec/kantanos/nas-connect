@@ -2,7 +2,8 @@
 # KantanOS: connect network shares from a NAS (SMB), so they work like normal folders in
 # every app (games, emulators and players included), not just in Files.
 #
-#   nas-connect            ask for the NAS, sign in, pick shares, connect them
+#   nas-connect            ask for the NAS, sign in, pick shares, connect them (in the terminal)
+#   nas-connect --window   the same with windows (Welcome); asks for the PC's password once
 #   nas-connect list       show connected shares
 #   nas-connect remove     disconnect all shares set up by this tool
 #
@@ -14,6 +15,65 @@ MNT_ROOT=/var/mnt/nas
 UNIT_DIR=/etc/systemd/system
 TAG="# made by kantanos nas-connect"
 USER_NAME="${SUDO_USER:-}"
+[ -n "${PKEXEC_UID:-}" ] && USER_NAME=$(id -nu "$PKEXEC_UID" 2>/dev/null)
+TITLE="Connect your NAS"
+
+# Server names: letters, digits, dots, dashes; share names: no slashes or line breaks
+good_server() { case "$1" in *[!A-Za-z0-9._-]*|"") return 1 ;; esac; }
+good_share() { case "$1" in */*|*$'\n'*|.*|"") return 1 ;; esac; }
+
+# Adds shares to the Files sidebar (run as the person, not root)
+add_sidebar() {
+    python3 - /var/mnt/nas "$@" <<'PY'
+import os, sys, time, urllib.parse
+root, shares = sys.argv[1], sys.argv[2:]
+path = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "user-places.xbel")
+try:
+    text = open(path, encoding="utf-8").read()
+except OSError:
+    sys.exit(0)
+stamp = int(time.time())
+added = ""
+for i, share in enumerate(shares):
+    href = "file://" + urllib.parse.quote(os.path.join(root, share))
+    if href in text:
+        continue
+    title = share.replace("&", "&amp;").replace("<", "&lt;")
+    added += (f' <bookmark href="{href}">\n  <title>{title}</title>\n  <info>\n'
+              f'   <metadata owner="http://freedesktop.org">\n    <bookmark:icon name="folder-network"/>\n   </metadata>\n'
+              f'   <metadata owner="http://www.kde.org">\n    <ID>{stamp}/nas{i}</ID>\n   </metadata>\n  </info>\n </bookmark>\n')
+if added:
+    open(path, "w", encoding="utf-8").write(text.replace("</xbel>", added + "</xbel>"))
+PY
+}
+
+# --window: the questions in windows, as the person; then "apply" as root (pkexec)
+if [ "${1:-}" = "--window" ]; then
+    say() { kdialog --title "$TITLE" --sorry "$1"; }
+    server=$(kdialog --title "$TITLE" --inputbox "The name or address of your NAS (for example truenas.local or 192.168.1.20):" "truenas.local") || exit 0
+    server="${server#smb://}"; server="${server%%/*}"
+    good_server "$server" || { say "\"$server\" doesn't look like a network name or address."; exit 1; }
+    getent hosts "$server" >/dev/null || { say "Can't find \"$server\" on the network. Check that the NAS is on, or type its address (numbers like 192.168.1.20)."; exit 1; }
+    nasuser=$(kdialog --title "$TITLE" --inputbox "Your user name on the NAS:") || exit 0
+    [ -n "$nasuser" ] || { say "A user name is needed."; exit 1; }
+    naspass=$(kdialog --title "$TITLE" --password "The password for $nasuser on the NAS:") || exit 0
+    tmp=$(mktemp -p "${XDG_RUNTIME_DIR:-/tmp}" nas-XXXXXX.cred) && chmod 600 "$tmp"
+    trap 'rm -f "$tmp"' EXIT
+    printf 'username=%s\npassword=%s\n' "$nasuser" "$naspass" > "$tmp"
+    unset naspass
+    mapfile -t shares < <(smbclient -L "//$server" -A "$tmp" -g 2>/dev/null | awk -F'|' '$1=="Disk" && $2 !~ /\$$/ {print $2}')
+    [ "${#shares[@]}" -gt 0 ] || { say "Couldn't see any shared folders. The user name or password may be wrong, or this user has no shared folders."; exit 1; }
+    args=(); for sh in "${shares[@]}"; do args+=("$sh" "$sh" on); done
+    mapfile -t pick < <(kdialog --title "$TITLE" --separate-output --checklist "Which shared folders should work like normal folders on this PC?" "${args[@]}") || exit 0
+    [ "${#pick[@]}" -gt 0 ] || exit 0
+    if ! pkexec "$0" apply "$server" "$tmp" "${pick[@]}"; then
+        say "The shared folders weren't connected (the PC's password wasn't given, or something went wrong)."
+        exit 1
+    fi
+    add_sidebar "${pick[@]}" 2>/dev/null
+    kdialog --title "$TITLE" --msgbox "Connected: ${pick[*]}. They are in the Files sidebar, and open like normal folders in every app."
+    exit 0
+fi
 
 [ "$(id -u)" = 0 ] || exec sudo "$0" "$@"
 
@@ -58,6 +118,17 @@ PY
         exit 0 ;;
 esac
 
+if [ "${1:-}" = "apply" ]; then           # apply SERVER CREDFILE SHARE… (from --window)
+    server=$2; src=$3; shift 3
+    good_server "$server" || exit 1
+    [ -n "${PKEXEC_UID:-}" ] && [ "$(stat -c %u "$src")" = "$PKEXEC_UID" ] || exit 1
+    grep -qvE '^(username|password)=' "$src" && exit 1
+    mkdir -p "$CRED_DIR"; chmod 0700 "$CRED_DIR"
+    cred="$CRED_DIR/$server.cred"
+    (umask 077; cat "$src" > "$cred")
+    shares=(); for sh in "$@"; do good_share "$sh" && shares+=("$sh"); done
+    pick=$(seq 1 "${#shares[@]}")
+else
 echo "Connect your NAS"
 echo "================"
 read -r -p "NAS name or address [truenas.local]: " server
@@ -93,6 +164,7 @@ echo "Shares on $server:"
 for i in "${!shares[@]}"; do echo "  $((i + 1)). ${shares[$i]}"; done
 read -r -p "Which to connect? Numbers separated by spaces, or Enter for all: " pick
 if [ -z "$pick" ]; then pick=$(seq 1 "${#shares[@]}"); fi
+fi
 
 uid=$(id -u "$USER_NAME" 2>/dev/null || echo 1000)
 gid=$(id -g "$USER_NAME" 2>/dev/null || echo 1000)
@@ -137,28 +209,8 @@ for share in "${connected[@]}"; do
 done
 
 # Show them in the Files sidebar of the person who ran this
-if [ -n "$USER_NAME" ] && [ "${#connected[@]}" -gt 0 ]; then
-    sudo -u "$USER_NAME" python3 - "$MNT_ROOT" "${connected[@]}" <<'PY'
-import os, sys, time, urllib.parse
-root, shares = sys.argv[1], sys.argv[2:]
-path = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "user-places.xbel")
-try:
-    text = open(path, encoding="utf-8").read()
-except OSError:
-    sys.exit(0)
-stamp = int(time.time())
-added = ""
-for i, share in enumerate(shares):
-    href = "file://" + urllib.parse.quote(os.path.join(root, share))
-    if href in text:
-        continue
-    title = share.replace("&", "&amp;").replace("<", "&lt;")
-    added += (f' <bookmark href="{href}">\n  <title>{title}</title>\n  <info>\n'
-              f'   <metadata owner="http://freedesktop.org">\n    <bookmark:icon name="folder-network"/>\n   </metadata>\n'
-              f'   <metadata owner="http://www.kde.org">\n    <ID>{stamp}/nas{i}</ID>\n   </metadata>\n  </info>\n </bookmark>\n')
-if added:
-    open(path, "w", encoding="utf-8").write(text.replace("</xbel>", added + "</xbel>"))
-PY
+if [ -n "$USER_NAME" ] && [ "${#connected[@]}" -gt 0 ] && [ -z "${PKEXEC_UID:-}" ]; then
+    sudo -u "$USER_NAME" bash -c "$(declare -f add_sidebar); add_sidebar \"\$@\"" _ "${connected[@]}"
 fi
 
 echo

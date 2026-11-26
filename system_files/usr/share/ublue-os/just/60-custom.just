@@ -28,7 +28,7 @@ kantan-audio-71:
         echo "No HDMI device offering 7.1 was found. Turn the receiver on first, then run this again."
         exit 1
     fi
-    echo "Done. Test each speaker with: ujust kantan-speaker-test"
+    echo "To test each speaker: System Settings → Sound, then the speaker test for this device."
 
 # Say each speaker's name from that speaker, one at a time ("Front Left", "Side Right", ...)
 kantan-speaker-test:

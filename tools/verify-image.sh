@@ -36,6 +36,7 @@ check "glass panel theme present"           "test -s /usr/share/plasma/desktopth
 check "starter-app service enabled"         "systemctl is-enabled kantanos-flatpak-setup.service"
 check "starter-app script executable"       "test -x /usr/libexec/kantanos/flatpak-setup"
 check "Steam does not autostart"            "test ! -e /etc/skel/.config/autostart/steam.desktop"
+check "Welcome tasks open windows, not terminals" "python3 /usr/libexec/kantanos/task-window --self-test | grep -q ok && python3 /usr/libexec/kantanos/update-window --self-test | grep -q ok && test -x /usr/libexec/uupd-update && grep -q update-window /usr/share/yafti/yafti.yml && grep -q \"nas-connect --window\" /usr/share/yafti/yafti.yml && test \"$(grep -c Press.Enter /usr/share/yafti/yafti.yml)\" -le 1"
 check "welcome app is KantanOS"             "grep -q KantanOS /usr/share/yafti/yafti.yml && grep -q KantanOS /usr/bin/yafti_gtk.py && ! grep -q -i bazzite /usr/share/yafti/yafti.yml"
 check "welcome definition is valid YAML"    "python3 /usr/libexec/kantanos/check-welcome"
 check "kantan-app helper works"             "kantan-app status org.example.Nothing | grep -q uninstall"

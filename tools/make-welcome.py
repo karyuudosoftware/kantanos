@@ -4,7 +4,7 @@ Bazzite base already ships). Output replaces /usr/share/yafti/yafti.yml in the i
 
 Run from anywhere:  python tools/make-welcome.py
 """
-import json, os
+import json, os, shlex
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
                    "system_files", "usr", "share", "yafti", "yafti.yml")
@@ -46,7 +46,17 @@ TOOLS = [
     ("org.gnome.World.PikaBackup", "Pika Backup", "Backups as often as every hour to the NAS or a USB drive, with older versions of every file to go back to."),
 ]
 
-PAUSE = 'echo; echo "Press Enter to close..."; read -r _'
+PAUSE = 'echo; echo "Press Enter to close..."; read -r _'   # only for Claude Code (a programmer's tool)
+
+
+def task(title, doing, done, command, failed="That didn't work.", show=False, ask="", restart=False):
+    """A task in a small window (task-window) instead of a terminal: "Working…", then the result."""
+    args = ["/usr/libexec/kantanos/task-window", "--title", title, "--doing", doing, "--done", done,
+            "--failed", failed]
+    args += ["--show-output"] if show else []
+    args += ["--ask", ask] if ask else []
+    args += ["--restart"] if restart else []
+    return "nohup setsid " + shlex.join(args + ["--"] + command) + " >&/dev/null"
 
 
 def q(text):
@@ -103,11 +113,18 @@ doc += screen("Welcome!", "Get started with KantanOS", "".join([
     action("home", "Smart home", "See and change the house temperature from the top bar, for example a Google Nest thermostat, through Home Assistant (free; runs in your home or on this PC).",
            "nohup setsid kantan-home >&/dev/null"),
     action("nas", "Connect your NAS", "Make the shared folders on your NAS (for example a TrueNAS box) work like normal folders in every app. Asks for the NAS user name and password once.",
-           f"ujust kantan-nas-connect; {PAUSE}"),
+           "nohup setsid /usr/libexec/kantanos/nas-connect --window >&/dev/null"),
     action("wake", "Wake this PC from another device", "Shows the details a wake-up app needs to switch this PC on over the network (Wake-on-LAN).",
-           f"ujust kantan-wake-info; {PAUSE}"),
+           task("Wake this PC from another device", "Looking up this PC's network details",
+                "Details for your wake-up app", ["ujust", "kantan-wake-info"], show=True,
+                failed="Wake-on-LAN needs a network cable")),
     action("update", "Check for updates", "Update KantanOS and your apps. A restart applies system updates; the previous version stays available as a fallback.",
-           f"ujust update; {PAUSE}"),
+           "nohup setsid /usr/libexec/kantanos/update-window >&/dev/null"),
+    action("undo-update", "Undo the last update", "If something stopped working after an update, go back to the version from before it. Takes effect when the PC restarts. Needs the PC's password.",
+           task("Undo the last update", "Getting the previous version ready", "The previous version is ready. Restart the PC to go back to it.",
+                ["pkexec", "bootc", "rollback"], restart=True,
+                failed="It couldn't go back (the PC's password wasn't given, or there is no earlier version on this PC).",
+                ask="Go back to the version of KantanOS from before the last update? Your files and apps stay as they are; only KantanOS itself goes back. This happens when the PC restarts.")),
     action("about", "About this PC", "Show the KantanOS version and system details.",
            "nohup setsid kinfocenter >&/dev/null"),
 ]), hidden=True)
@@ -125,7 +142,8 @@ doc += screen("Creative", "Photos, drawing, video and audio", "".join(app(*a) fo
 doc += screen("Media & Chat", "Players and messaging", "".join(app(*a) for a in MEDIA + CHAT))
 doc += screen("Windows", "Windows programs", "".join([
     action("notepadpp", "Notepad++", "The Windows Notepad++ text editor, downloaded from its official page and installed in your Windows programs.",
-           f"kantan-windows install-notepadpp; {PAUSE}"),
+           task("Notepad++", "Downloading and installing Notepad++", "Notepad++ is installed. It's in the app menu.",
+                ["kantan-windows", "install-notepadpp"], failed="Notepad++ couldn't be installed")),
     action("cdrive", "Open the C: drive", "Program Files and the other folders your Windows programs use. It is also in the Files sidebar as \"C: (Windows)\".",
            "nohup setsid kantan-windows c-drive >&/dev/null"),
     action("winhow", "Install any Windows program", "Download its installer (.exe or .msi) and double-click it in Files. It then appears in the app menu and in search (Win+Space). Most programs work; the rest need the Windows virtual machine below.",
@@ -172,16 +190,18 @@ doc += screen("Tools", "Disk space and system helpers", "".join([
            "nohup setsid /usr/libexec/kantanos/virus-scan --quarantine >&/dev/null"),
     action("siteblock", "Block bad sites", "KantanOS keeps this PC away from sites known for viruses, scams, tracking and adverts, in every browser. Here you can turn off one kind of blocking (for example shop and deal links), always allow a site you trust, or check why a site won't open. Changes need the PC's password.",
            "nohup setsid /usr/libexec/kantanos/site-blocker >&/dev/null"),
-    action("fixdock", "Dock or screen missing?", "Puts the dock back, and lists the screens KantanOS sees (an AV receiver on HDMI can count as a screen). To pick the main screen, run: ujust kantan-main-screen",
-           f"ujust kantan-reset-dock; ujust kantan-display-info; {PAUSE}"),
+    action("fixdock", "Dock or screen missing?", "Puts the dock back, and lists the screens KantanOS sees (an AV receiver on HDMI can count as a screen). To choose the main screen: System Settings → Display & Monitor.",
+           task("Dock or screen missing?", "Putting the dock back", "The dock is back. These are the screens KantanOS sees:",
+                ["bash", "-c", "ujust kantan-reset-dock && ujust kantan-display-info"], show=True)),
 ]) + "".join(app(*a) for a in TOOLS))
 doc += screen("Display & Sound", "HDR and surround sound", "".join([
     action("hdr-on", "Turn HDR on", "Enables HDR and wide colour on every connected display that supports it.",
-           f"ujust kantan-hdr-on; {PAUSE}"),
+           task("Turn HDR on", "Turning HDR on", "HDR is on for every screen that supports it.", ["ujust", "kantan-hdr-on"], show=True)),
     action("hdr-off", "Turn HDR off", "Switches every display back to standard colour.",
-           f"ujust kantan-hdr-off; {PAUSE}"),
+           task("Turn HDR off", "Turning HDR off", "HDR is off.", ["ujust", "kantan-hdr-off"])),
     action("audio-71", "Use 7.1 surround over HDMI", "For an AV receiver. Turn the receiver on first. Heights are added by the receiver's upmixer.",
-           f"ujust kantan-audio-71; {PAUSE}"),
+           task("7.1 surround", "Switching the sound to 7.1 surround", "The sound is now 7.1 surround.", ["ujust", "kantan-audio-71"],
+                failed="7.1 surround isn't available", show=True)),
     action("atmos", "Films with Dolby Atmos", "Open films with \"Movie Player (Dolby Atmos)\" (right-click a film → Open With). It sends Dolby Atmos, TrueHD and DTS sound untouched to the receiver, like PotPlayer's pass-through on Windows.",
            "nohup setsid xdg-open \"$HOME/Videos\" >&/dev/null"),
 ]))

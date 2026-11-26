@@ -1,0 +1,266 @@
+#!/usr/bin/python3
+"""KantanOS Updates: checks for updates in a window with a progress bar and plain words,
+instead of the update tool's raw output in a terminal.
+
+It runs the same update the PC does by itself every day (uupd, through /usr/libexec/uupd-update,
+which any person on this PC may start). If the daily update is already running, it shows that
+one. Closing the window doesn't stop the update: it carries on in the background, and nothing
+changes on the PC until it restarts.
+
+  update-window                 check for updates now
+  update-window --replay FILE   show a saved update log, slowly (for tests and screenshots)
+  update-window --self-test     reads sample lines, prints "ok"
+"""
+import json
+import os
+import subprocess
+import sys
+
+TITLE = "Updates"
+UPDATE = "/usr/libexec/uupd-update"
+
+# uupd's parts, in plain words
+PARTS = {
+    "system": "Downloading the new KantanOS",
+    "flatpak": "Updating your apps",
+    "brew": "Updating extra tools",
+    "distrobox": "Updating extra tools",
+    "firmware": "Checking the PC's own built-in software",
+}
+STAGES = {"Downloading": "Downloading the new KantanOS",
+          "Importing": "Unpacking the new KantanOS",
+          "Deploying": "Getting the new KantanOS ready for the next start"}
+
+
+def size(n):
+    gb = n / 1e9
+    return f"{gb:.1f} GB" if gb >= 1 else f"{n / 1e6:.0f} MB"
+
+
+class Reader:
+    """Turns uupd's log lines into what the window shows. Each line is JSON from uupd (or the
+    old plain-text form); anything it doesn't understand is kept for "Details" only."""
+
+    def __init__(self):
+        self.percent = None          # 0-100 overall, None while unknown
+        self.doing = "Checking for updates…"
+        self.detail = ""
+        self.failed = []             # parts that went wrong, in plain words
+        self.busy_elsewhere = False
+        self.details = []
+
+    def line(self, raw):
+        raw = raw.strip()
+        if not raw:
+            return
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            self.details.append(raw)
+            return
+        if not isinstance(rec, dict):
+            return
+        msg = str(rec.get("msg", ""))
+        module = str(rec.get("module", "")).lower()
+        if "overall" in rec:
+            try:
+                self.percent = max(self.percent or 0, min(100.0, float(rec["overall"])))
+            except (TypeError, ValueError):
+                pass
+        if msg == "Updating":
+            self.doing = STAGES.get(str(rec.get("description", "")), PARTS.get(module, self.doing))
+            if module != "system":
+                self.detail = ""
+        out = rec.get("output")
+        if isinstance(out, str) and out.startswith("{"):
+            self.bootc(out)
+        if msg.startswith("An update is already in progress"):
+            self.busy_elsewhere = True
+        if rec.get("status") == "failed" or msg.endswith("module has failed."):
+            name = PARTS.get(module or str(rec.get("context", "")).lower(), module or "one part")
+            if name not in self.failed:
+                self.failed.append(name)
+        text = rec.get("output") if isinstance(out, str) and not out.startswith("{") else msg
+        if text and rec.get("level") != "DEBUG":
+            self.details.append(str(text))
+
+    def bootc(self, raw):
+        """bootc's own progress (passed on by uupd): how much of the new KantanOS has arrived."""
+        try:
+            p = json.loads(raw)
+        except ValueError:
+            return
+        if p.get("type") == "ProgressBytes" and p.get("task") == "pulling" and p.get("bytesTotal"):
+            self.doing = STAGES["Downloading"]
+            self.detail = f"{size(p.get('bytes', 0))} of {size(p['bytesTotal'])}"
+        elif p.get("task") == "importing":
+            self.doing, self.detail = STAGES["Importing"], ""
+        elif p.get("task") == "staging":
+            self.doing, self.detail = STAGES["Deploying"], ""
+
+
+def restart_waiting():
+    """True when a new KantanOS has been downloaded and waits for the next start."""
+    try:
+        out = subprocess.run(["rpm-ostree", "status", "--json"], capture_output=True, text=True, timeout=60).stdout
+        return any(d.get("staged") for d in json.loads(out).get("deployments", []))
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return False
+
+
+SAMPLE = [
+    '{"level":"INFO","msg":"Updating","module":"system","status":"starting","output":"System module is starting.","title":"System","description":"System Updates","overall":0}',
+    '{"level":"DEBUG","msg":"Command output","status":"running","output":"{\\"bytes\\":1242012993,\\"bytesCached\\":5484516167,\\"bytesTotal\\":1689711138,\\"description\\":\\"Pulling Image: sha256:06e9\\",\\"steps\\":0,\\"stepsTotal\\":1,\\"task\\":\\"pulling\\",\\"type\\":\\"ProgressBytes\\"}"}',
+    '{"level":"INFO","msg":"Updating","module":"system","status":"running","output":"Updating System (Downloading)","title":"System","description":"Downloading","overall":29.4}',
+    '{"level":"INFO","msg":"Updating","module":"flatpak","status":"starting","output":"Flatpak module is starting.","title":"Flatpak","description":"Flatpak System Apps","overall":50}',
+    '{"level":"ERROR","msg":"Flatpak module has failed.","module":"flatpak","status":"finished","exit_code":1,"output":"Flatpak module has failed."}',
+    'not json at all',
+]
+
+
+def self_test():
+    r = Reader()
+    for i, s in enumerate(SAMPLE):
+        r.line(s)
+        if i == 1:
+            assert r.detail == "1.2 GB of 1.7 GB", r.detail
+            assert r.doing == "Downloading the new KantanOS", r.doing
+    assert r.percent == 50, r.percent
+    assert r.failed == ["Updating your apps"], r.failed
+    assert "not json at all" in r.details
+    print("ok")
+
+
+def main():
+    if "--self-test" in sys.argv:
+        return self_test()
+    replay = sys.argv[sys.argv.index("--replay") + 1] if "--replay" in sys.argv else None
+
+    from PySide6.QtCore import QProcess, QTimer
+    from PySide6.QtGui import QFont, QIcon
+    from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QPlainTextEdit, QProgressBar,
+                                   QPushButton, QVBoxLayout, QWidget)
+
+    app = QApplication(sys.argv)
+    app.setApplicationName(TITLE)
+    app.setDesktopFileName("kantanos-updates")
+    win = QWidget()
+    win.setWindowTitle(TITLE)
+    win.setWindowIcon(QIcon.fromTheme("system-software-update"))
+    win.setMinimumWidth(520)
+    lay = QVBoxLayout(win)
+    lay.setContentsMargins(24, 20, 24, 20)
+    lay.setSpacing(12)
+    head = QLabel("Checking for updates…")
+    f = QFont()
+    f.setPointSizeF(f.pointSizeF() * 1.35)
+    f.setBold(True)
+    head.setFont(f)
+    head.setWordWrap(True)
+    sub = QLabel("You can keep using the PC while this runs.")
+    sub.setWordWrap(True)
+    bar = QProgressBar()
+    bar.setRange(0, 0)               # moving until there's a number to show
+    bar.setTextVisible(True)
+    note = QLabel()
+    note.setWordWrap(True)
+    details = QPlainTextEdit()
+    details.setReadOnly(True)
+    details.setVisible(False)
+    details.setMinimumHeight(160)
+    row = QHBoxLayout()
+    more = QPushButton("Details")
+    more.setCheckable(True)
+    more.toggled.connect(details.setVisible)
+    row.addWidget(more)
+    row.addStretch(1)
+    restart = QPushButton(QIcon.fromTheme("system-reboot"), "Restart now")
+    restart.setVisible(False)
+    close = QPushButton("Hide")
+    close.setToolTip("The update carries on in the background")
+    row.addWidget(restart)
+    row.addWidget(close)
+    for w in (head, sub, bar, note):
+        lay.addWidget(w)
+    lay.addLayout(row)
+    lay.addWidget(details)
+    close.clicked.connect(win.close)
+    restart.clicked.connect(lambda: subprocess.Popen(["systemctl", "reboot"]))
+
+    r = Reader()
+    state = {"buf": b"", "shown": 0}
+
+    def refresh():
+        head.setText(r.doing + ("…" if not r.doing.endswith("…") else ""))
+        note.setText(r.detail)
+        if r.percent is not None:
+            bar.setRange(0, 100)
+            bar.setValue(int(r.percent))
+        if len(r.details) > state["shown"]:
+            for d in r.details[state["shown"]:]:
+                details.appendPlainText(d)
+            state["shown"] = len(r.details)
+
+    def finish(code):
+        bar.setRange(0, 100)
+        close.setText("Close")
+        close.setToolTip("")
+        if restart_waiting():
+            bar.setValue(100)
+            head.setText("The new KantanOS is ready")
+            sub.setText("Restart the PC to finish. Everything you were doing stays as it was until "
+                        "then, and if anything goes wrong after the restart you can go back "
+                        "(Welcome → Tools → Undo the last update).")
+            restart.setVisible(True)
+            close.setText("Later")
+        elif code == 0 and not r.failed:
+            bar.setValue(100)
+            head.setText("Everything is up to date")
+            sub.setText("There was nothing new this time, or it has all been installed already.")
+        else:
+            head.setText("Some updates didn't finish")
+            what = ", ".join(r.failed) if r.failed else "the update"
+            sub.setText(f"This part didn't finish: {what}. Nothing on the PC was changed by it. It is "
+                        "tried again by itself every day; if it keeps happening, press Details and "
+                        "show what it says to someone who can help.")
+        note.setText("")
+        if r.failed or code:
+            more.setChecked(True)
+
+    if replay:
+        lines = open(replay, encoding="utf-8", errors="replace").read().splitlines()
+
+        def step():
+            if not lines:
+                timer.stop()
+                return finish(0)
+            r.line(lines.pop(0))
+            refresh()
+        timer = QTimer(win)
+        timer.timeout.connect(step)
+        timer.start(400)
+    else:
+        proc = QProcess(win)
+
+        def read():
+            state["buf"] += bytes(proc.readAllStandardOutput())
+            *done, state["buf"] = state["buf"].split(b"\n")
+            for ln in done:
+                r.line(ln.decode("utf-8", "replace"))
+            refresh()
+        proc.readyReadStandardOutput.connect(read)
+        proc.setProcessChannelMode(QProcess.MergedChannels)
+        proc.finished.connect(lambda code, _s: (read(), finish(code)))
+        proc.errorOccurred.connect(lambda _e: finish(1))
+        proc.start(UPDATE, [])
+
+    win.show()
+    shot = os.environ.get("KANTAN_WINDOW_SHOT", "")      # tests: "picture.png:seconds"
+    if shot:
+        path, _, secs = shot.rpartition(":")
+        QTimer.singleShot(int(float(secs) * 1000), lambda: (win.grab().save(path), app.quit()))
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
