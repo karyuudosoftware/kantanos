@@ -312,6 +312,12 @@ with open(path, "w", encoding="utf-8") as fh:
 PY
 grep -q 'x-msi=kantanos-windows-program.desktop' /etc/xdg/mimeapps.list
 
+# NVIDIA's login helper "fails" on PCs without an NVIDIA card (its check exits 1), and the Helper
+# lists it as a problem. Finish quietly instead. (nvidia-cdi-refresh: a drop-in in system_files.)
+sed -i 's|^Exec=sh -c "\[ -e /dev/nvidia0 \] && exec /usr/bin/nvidia-settings --load-config-only"$|Exec=sh -c "[ -e /dev/nvidia0 ] \|\| exit 0; exec /usr/bin/nvidia-settings --load-config-only"|' \
+    /etc/xdg/autostart/nvidia-settings-load.desktop
+grep -q 'nvidia0 \] || exit 0' /etc/xdg/autostart/nvidia-settings-load.desktop
+
 # Waydroid's own menu entry opens its "Initialize Waydroid" window, which asks for download
 # addresses nobody knows. Send it to KantanOS's Android setup instead (addresses filled in).
 sed -i -e 's|^Exec=waydroid$|Exec=kantan-android|' -e 's|^Exec=waydroid init --client$|Exec=kantan-android setup|' \
