@@ -409,13 +409,18 @@ class Avatar(QWidget):
     """Draws the character pack's frames: idle (gently bobbing, blinking), think, happy,
     worried, and talk1/talk2 while speaking. A pack is a folder of SVG or PNG files, or
     several outfits in looks/<name>/ worn by season, time of day and weather (looks.py),
-    rechecked every 10 minutes."""
+    rechecked every 10 minutes.
+    full=True (the Helper window): the whole of her, head to shoes, from looks/<name>/full/
+    (idle.png plus small face pictures put on it, faces.json), standing still; packs without
+    full pictures fall back to the head-to-hips frames."""
 
-    def __init__(self, pack, context=""):
+    def __init__(self, pack, context="", full=False):
         super().__init__()
-        self.setFixedSize(132, 165)
+        self.full = full
+        self.setFixedSize(*((190, 440) if full else (132, 165)))
         self.pack, self.context, self.look = pack, context, None
         self.frames = {}
+        self.scaled = {}                   # (frame, w, h) -> picture shrunk smoothly, once
         self.load_look()
         self.look_timer = QTimer(self, interval=10 * 60 * 1000, timeout=self.load_look)
         self.look_timer.start()
@@ -433,6 +438,14 @@ class Avatar(QWidget):
         if folder == self.look and self.frames:
             return
         self.look, frames = folder, {}
+        self.scaled = {}
+        if self.full and folder and os.path.isfile(os.path.join(folder, "full", "idle.png")):
+            self.frames = self.full_frames(os.path.join(folder, "full"))
+            self.update()
+            return
+        if self.full:                      # no full pictures in this pack: the usual size
+            self.full = False
+            self.setFixedSize(132, 165)
         for name in ("idle", "blink", "talk1", "talk2", "think", "happy", "worried", "listen"):
             for ext in (".svg", ".png"):
                 p = os.path.join(folder, name + ext) if folder else ""
@@ -445,6 +458,27 @@ class Avatar(QWidget):
                     break
         self.frames = frames
         self.update()
+
+    @staticmethod
+    def full_frames(folder):
+        from PySide6.QtGui import QPixmap
+        base = QPixmap(os.path.join(folder, "idle.png"))
+        frames = {"idle": base}
+        try:
+            with open(os.path.join(folder, "faces.json"), encoding="utf-8") as f:
+                faces = json.load(f)
+        except (OSError, ValueError):
+            faces = {}
+        for name, (x, y) in faces.items():
+            face = QPixmap(os.path.join(folder, name + ".png"))
+            if face.isNull():
+                continue
+            pm = QPixmap(base)
+            p = QPainter(pm)
+            p.drawPixmap(int(x), int(y), face)
+            p.end()
+            frames[name] = pm
+        return frames
 
     def blink(self):
         self.blinking = True
@@ -465,15 +499,28 @@ class Avatar(QWidget):
         if frame is None:
             return
         speed = 4.5 if self.mood == "listen" else 2.2          # a little livelier while listening
-        bob = math.sin((time.monotonic() - self.t0) * speed) * 2.5 if self.mood in ("idle", "think", "listen") else 0
+        bob = 0                                                  # the full-length picture stands still
+        if not self.full and self.mood in ("idle", "think", "listen"):
+            bob = math.sin((time.monotonic() - self.t0) * speed) * 2.5
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        p.setRenderHint(QPainter.SmoothPixmapTransform)          # drawn pictures scale smoothly
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
         target = QRectF(0, 3 + bob, self.width(), self.height() - 6)
         if isinstance(frame, QSvgRenderer):
             frame.render(p, target)
-        else:
-            p.drawPixmap(target.toRect(), frame)
+            return
+        # shrunk once with proper smoothing (drawing a big picture small each time looks jagged),
+        # at the screen's real pixel size, keeping her proportions
+        dpr = self.devicePixelRatioF()
+        key = (name if name in self.frames else "idle", self.width(), self.height(), dpr)
+        pm = self.scaled.get(key)
+        if pm is None:
+            pm = frame.scaled(int(target.width() * dpr), int(target.height() * dpr),
+                              Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            pm.setDevicePixelRatio(dpr)
+            self.scaled[key] = pm
+        w, h = pm.width() / dpr, pm.height() / dpr
+        p.drawPixmap(QRectF(target.x() + (target.width() - w) / 2, target.y(), w, h), pm, QRectF(pm.rect()))
 
 
 class Voice:
@@ -774,7 +821,7 @@ class Helper(QWidget):
         self.search = ""
         self.setWindowTitle(TITLE)
         self.setWindowIcon(QIcon.fromTheme("help-browser"))
-        self.resize(760, 720)
+        self.resize(900, 740)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(24, 20, 24, 20)
@@ -791,11 +838,18 @@ class Helper(QWidget):
         self.char_name = info.get("name", "Helper")
         self.greeting = info.get("greeting", "")
         self.voice = Voice(self.cfg.get("voice") or info.get("voice", DEFAULT_VOICE))
-        self.avatar = Avatar(pack, "helper") if pack else None
-        top = QHBoxLayout()
-        top.setSpacing(16)
+        self.avatar = Avatar(pack, "helper", full=True) if pack else None
+        # her own column on the left, the whole height of the top half; everything else beside her
+        outer = QHBoxLayout()
+        outer.setSpacing(20)
         if self.avatar:
-            top.addWidget(self.avatar, 0, Qt.AlignTop)
+            outer.addWidget(self.avatar, 0, Qt.AlignTop)
+        main_lay = lay
+        lay = QVBoxLayout()
+        lay.setSpacing(12)
+        outer.addLayout(lay, 1)
+        main_lay.addLayout(outer, 1)
+        top = QHBoxLayout()
         titles = QVBoxLayout()
         head = QLabel(TITLE)
         f = QFont(); f.setPointSizeF(f.pointSizeF() * 1.8); f.setBold(True)

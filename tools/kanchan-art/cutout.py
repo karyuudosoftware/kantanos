@@ -61,9 +61,14 @@ def frame(cutimg, bust=0.5, box=None):
     """Head to chest (or as much of her as --bust says), centred on her head, 480x600.
     box: (left, top, height) in the drawing's own pixels, for pictures where the top of the
     shape isn't her head (an umbrella, a hat)."""
+    return cutimg.crop(frame_box(cutimg, bust, box)).resize((W, H), Image.LANCZOS)
+
+
+def frame_box(cutimg, bust=0.5, box=None):
+    """The part of the cut-out drawing that frame() shows: (left, top, right, bottom)."""
     if box:
         left, top, h = box
-        return cutimg.crop((left, top, left + int(h * W / H), top + h)).resize((W, H), Image.LANCZOS)
+        return (left, top, left + int(h * W / H), top + h)
     a = np.asarray(cutimg.getchannel("A")) > 128
     ys, xs = np.nonzero(a)
     top, bottom = ys.min(), ys.max()
@@ -73,8 +78,7 @@ def frame(cutimg, bust=0.5, box=None):
     crop_h = int(height * bust)
     crop_w = int(crop_h * W / H)
     margin = int(crop_h * 0.06)
-    box = (hx - crop_w // 2, top - margin, hx - crop_w // 2 + crop_w, top - margin + crop_h)
-    return cutimg.crop(box).resize((W, H), Image.LANCZOS)
+    return (hx - crop_w // 2, top - margin, hx - crop_w // 2 + crop_w, top - margin + crop_h)
 
 
 if __name__ == "__main__":
