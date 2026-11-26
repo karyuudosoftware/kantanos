@@ -52,7 +52,29 @@ done
 # Local AI for the KantanOS Helper: Ollama with its Vulkan backend (runs on NVIDIA, AMD and
 # Intel graphics). Off until the user turns it on in the Helper (kantanos-ollama user
 # service); the model is downloaded then, into their home folder.
-dnf5 -y install ollama ollama-vulkan
+# Ollama's own Linux build, the newest release at build time (the image is built daily):
+# Fedora's package lags months behind, and models from Ollama's library then refuse to
+# download ("requires a newer version of Ollama"). Checked against the release's
+# sha256sum.txt. Only the CPU and Vulkan parts are kept; the CUDA parts (2.5 GB) aren't used.
+OLLAMA_TAG=$(curl -fsSL --retry 3 https://api.github.com/repos/ollama/ollama/releases/latest \
+    | python3 -c "import json, sys; print(json.load(sys.stdin)[\"tag_name\"])")
+OLLAMA_DL="https://github.com/ollama/ollama/releases/download/$OLLAMA_TAG"
+curl -fsSL --retry 3 -o /tmp/ollama.tar.zst "$OLLAMA_DL/ollama-linux-amd64.tar.zst"
+curl -fsSL --retry 3 -o /tmp/ollama-sums.txt "$OLLAMA_DL/sha256sum.txt"
+OLLAMA_SUM=$(grep -E '[ /]ollama-linux-amd64\.tar\.zst$' /tmp/ollama-sums.txt | cut -d' ' -f1)
+echo "$OLLAMA_SUM  /tmp/ollama.tar.zst" | sha256sum -c -
+mkdir -p /tmp/ollama /usr/share/licenses/ollama
+tar --zstd -xf /tmp/ollama.tar.zst -C /tmp/ollama
+rm -rf /tmp/ollama/lib/ollama/cuda_* /tmp/ollama/lib/ollama/rocm*
+install -m 755 /tmp/ollama/bin/ollama /usr/bin/ollama
+rm -rf /usr/lib/ollama
+cp -a /tmp/ollama/lib/ollama /usr/lib/ollama
+mv /usr/lib/ollama/*LICENSE* /usr/lib/ollama/*NOTICE* /usr/share/licenses/ollama/
+curl -fsSL --retry 3 -o /usr/share/licenses/ollama/LICENSE "https://raw.githubusercontent.com/ollama/ollama/$OLLAMA_TAG/LICENSE"
+echo "$OLLAMA_TAG" > /usr/share/licenses/ollama/VERSION
+rm -rf /tmp/ollama /tmp/ollama.tar.zst /tmp/ollama-sums.txt
+test -f /usr/lib/ollama/vulkan/libggml-vulkan.so
+/usr/bin/ollama --version
 # The Helper's voice: Piper text-to-speech on this PC (the voice itself downloads on first use)
 dnf5 -y install python3-piper-tts pipewire-utils
 python3 -c "import piper"

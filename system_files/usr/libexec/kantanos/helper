@@ -1119,8 +1119,16 @@ class Helper(QWidget):
                 self.speech.start()
         elif name == "setup":
             self.bar.hide()
-            self.status.setText("The AI on this PC is ready." if kind == "ok" and value is True
-                                else f"Setting up the AI on this PC didn't finish: {value}")
+            if kind == "ok" and value is True:
+                self.status.setText("The AI on this PC is ready.")
+            elif "newer version" in str(value).lower():
+                # Ollama's library refuses an engine that is too old; never send people hunting
+                # for downloads: KantanOS ships the engine and updates it
+                self.status.setText("This PC's AI engine is too old for that model. KantanOS brings a newer "
+                                    "one with its next update: restart the PC once it has updated (or run "
+                                    "\"ujust kantan-update\" now), then press Set up again.")
+            else:
+                self.status.setText(f"Setting up the AI on this PC didn't finish: {value}")
 
     def ask(self, report):
         provider = self.cfg.get("provider", "local")
