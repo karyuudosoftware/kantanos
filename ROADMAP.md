@@ -494,6 +494,12 @@ Steps:
       Also the plain-words "what KantanOS does and doesn't do" page for a public release:
       updates are automatic and can be undone; whether a game runs is up to its makers;
       one-time steps the person does themselves.
+- [ ] **Konsole: Ctrl+C / Ctrl+V copy and paste**, like Windows, instead of Ctrl+Shift+C / V.
+      "Stop the running program" (what Ctrl+C means in a terminal) moves to **Ctrl+Break**, as
+      in the Windows console, and also to Ctrl+Shift+C for keyboards without a Break key
+      (most laptops). Done in the image's defaults: Konsole shortcuts for Copy (Ctrl+C) and
+      Paste (Ctrl+V), and a KantanOS key layout (keytab) that sends the same stop signal Ctrl+C sends today for
+      Ctrl+Break and Ctrl+Shift+C. Tell people once, in the Welcome Tools help.
 - [x] **Updates with a progress window** (`update-window`, Welcome → Check for updates): runs
       the same update as the daily one and shows a progress bar and plain words ("Downloading
       the new KantanOS: 1.2 GB of 1.7 GB", "Updating your apps"), then "Restart to finish" or
