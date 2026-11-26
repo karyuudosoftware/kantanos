@@ -541,11 +541,13 @@ class Voice:
             if Voice._engine is None:
                 Voice._engine = Kokoro(*self.files)
             japanese = has_japanese(text)
-            if not japanese:
+            if japanese:
+                samples, rate = Voice._engine.create(japanese_sounds(text), voice=self.style,
+                                                     speed=KOKORO_PACE, is_phonemes=True)
+            else:
                 # Her name the Japanese way ("Kahn-chahn"), not the English "Can-chan"
                 text = re.sub(r"(?<!\w)Kan-?chan(?!\w)", "Kahn-chahn", text, flags=re.I)
-            samples, rate = Voice._engine.create(text, voice=self.style, speed=KOKORO_PACE,
-                                                 lang="ja" if japanese else "en-us")
+                samples, rate = Voice._engine.create(text, voice=self.style, speed=KOKORO_PACE, lang="en-us")
         import numpy
         pcm = (numpy.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes()
         with wave.open(out, "wb") as w:
@@ -587,6 +589,50 @@ class Voice:
     def stop(self):
         if self.player and self.player.poll() is None:
             self.player.terminate()
+
+
+_ja_reader = None
+
+
+def japanese_sounds(text):
+    """Japanese text as Kokoro's sounds, read the way Kokoro's makers do it (misaki). misaki
+    wants fugashi (no build for this Python) and mojimoji; the mecab command (Fedora's MeCab
+    with the IPA dictionary) gives the same word readings, and NFKC, which misaki applies
+    first anyway, already does mojimoji's full/half-width tidying. (espeak-ng reads こんにちは
+    letter by letter and says "Chinese letter" for every kanji.)"""
+    global _ja_reader
+    if _ja_reader is None:
+        import types
+
+        class Feature:
+            def __init__(self, pron, kana):
+                self.pron, self.kana = pron, kana
+
+        class Node:
+            def __init__(self, surface, char_type, unknown, pron, kana):
+                self.surface, self.char_type, self.is_unk = surface, char_type, unknown
+                self.feature = Feature(pron, kana)
+
+        def tag(line):
+            # one word per row: word, character type, unknown?, reading, pronunciation
+            out = subprocess.run(["mecab", "-F", r"%m\t%t\t%s\t%f[7]\t%f[8]\n", "-U", r"%m\t%t\t%s\t*\t*\n",
+                                  "-E", ""], input=line.replace("\n", " ") + "\n", capture_output=True,
+                                 text=True, timeout=30, check=True).stdout
+            nodes = []
+            for row in out.splitlines():
+                p = row.split("\t")
+                if len(p) == 5 and p[1].isdigit():
+                    nodes.append(Node(p[0], int(p[1]), p[2] == "1", None if p[4] == "*" else p[4],
+                                      None if p[3] == "*" else p[3]))
+            return nodes
+
+        sys.modules.setdefault("fugashi", types.SimpleNamespace(Tagger=lambda: tag))
+        sys.modules.setdefault("mojimoji", types.SimpleNamespace(zen_to_han=lambda t, **_: t,
+                                                                 han_to_zen=lambda t, **_: t))
+        from misaki import ja
+        _ja_reader = ja.JAG2P()
+    sounds = _ja_reader(text)
+    return re.sub(r"o ɯ(?=[ !?.,…]|$)", "oː", sounds)       # しよう: "shiyo u" -> "shiyō"
 
 
 def speakable(text):

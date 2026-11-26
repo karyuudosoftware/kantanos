@@ -80,8 +80,13 @@ dnf5 -y install python3-piper-tts pipewire-utils
 python3 -c "import piper"
 # ...and Kan-chan's own voice: Kokoro (kokoro-onnx; onnxruntime, numpy and espeak-ng already
 # come with Piper). Its voice files download on first use, after asking.
-pip3 install --prefix=/usr --only-binary=:all: --root-user-action=ignore --no-cache-dir kokoro-onnx==0.4.7
-python3 -c "from kokoro_onnx import Kokoro"
+# Japanese is read with misaki (Kokoro's own reader, Apache 2.0) and MeCab's IPA dictionary
+# (espeak-ng gets Japanese badly wrong); the Helper stands MeCab in for misaki's fugashi.
+dnf5 -y install mecab mecab-ipadic
+pip3 install --prefix=/usr --only-binary=:all: --root-user-action=ignore --no-cache-dir \
+    kokoro-onnx==0.4.7 misaki==0.7.4 jaconv==0.5.0
+python3 -c "from kokoro_onnx import Kokoro; import misaki, jaconv"
+echo こんにちは | mecab | grep -q コンニチハ
 # ...and its ears: whisper.cpp speech recognition (CPU build bundled in the Python module;
 # the speech model downloads on first use, after asking)
 dnf5 -y install python3-pywhispercpp
