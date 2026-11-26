@@ -39,8 +39,10 @@ MOODS = {"Cheerful and playful": "cheerful and playful, with lots of warmth",
          "Excitable and curious": "excitable and endlessly curious about everything"}
 LENGTHS = {"Short answers": "Keep answers short: one or two sentences.",
            "A bit more": "You may say a little more when it helps, up to four sentences."}
-# Piper voices whose licences allow family use (downloaded when chosen, ~60 MB each)
-VOICES = {"American, woman (Kan-chan)": "en_US-hfc_female-medium", "American, man": "en_US-hfc_male-medium",
+# Voices whose licences allow family use, downloaded when chosen: Kan-chan's is Kokoro
+# (about 200 MB, shared by all Kokoro voices), the others Piper (about 60 MB each)
+VOICES = {"Young, lively (Kan-chan)": "kokoro-jf_tebukuro",
+          "American, woman": "en_US-hfc_female-medium", "American, man": "en_US-hfc_male-medium",
           "British, woman (Scottish)": "en_GB-alba-medium", "British, woman": "en_GB-cori-medium",
           "British, man (Northern)": "en_GB-northern_english_male-medium"}
 

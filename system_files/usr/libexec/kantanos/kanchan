@@ -286,8 +286,8 @@ class CharacterMaker(QDialog):
     def hear(self):
         v = H.Voice(maker.VOICES[self.voice.currentText()])
         if not v.ready():
-            if QMessageBox.question(self, TITLE, "This voice needs a one-time download of about 60 MB (from the "
-                                    "Piper voice library). Download it now?") != QMessageBox.Yes:
+            if QMessageBox.question(self, TITLE, f"This voice needs a one-time download of {v.download_note}. "
+                                    "Download it now?") != QMessageBox.Yes:
                 return
             self.note.setText("Downloading the voice…")
         else:
@@ -781,7 +781,7 @@ class Companion(QWidget):
         self.style = maker.style_text(info.get("style"))
         self.side = None
         self.setWindowTitle(self.char_name)
-        self.voice = H.Voice(self.cfg.get("voice") or info.get("voice", "en_US-hfc_female-medium"))
+        self.voice = H.Voice(self.cfg.get("voice") or info.get("voice", H.DEFAULT_VOICE))
         self.ears = H.Ears()
 
         outer = QHBoxLayout(self)
@@ -1401,8 +1401,8 @@ class Companion(QWidget):
             self.offer_voice()
 
     def offer_voice(self):
-        ok = QMessageBox.question(self, TITLE, "My voice runs on this PC and needs a one-time download of about "
-                                  "60 MB (from the Piper voice library). Download it now?",
+        ok = QMessageBox.question(self, TITLE, "My voice runs on this PC and needs a one-time download of "
+                                  f"{self.voice.download_note}. Download it now?",
                                   QMessageBox.Yes | QMessageBox.No)
         if ok != QMessageBox.Yes:
             self.talk.setChecked(False)
@@ -1414,7 +1414,7 @@ class Companion(QWidget):
         text = H.spoken(H.speakable(text or ""), self.me)
         if not text or not (self.talk.isChecked() or force) or not self.voice.ready():
             return
-        if H.has_japanese(text) and self.voice.name.startswith("en"):
+        if H.has_japanese(text) and not self.voice.japanese:
             return
         self.in_thread("voice-synth", self.voice.synthesize, text[:900])
 
@@ -1683,7 +1683,7 @@ class Companion(QWidget):
         self.setWindowTitle(self.char_name)
         self.entry.setPlaceholderText(f"Type to {self.char_name}…")
         self.voice.stop()
-        self.voice = H.Voice(self.cfg.get("voice") or info.get("voice", "en_US-hfc_female-medium"))
+        self.voice = H.Voice(self.cfg.get("voice") or info.get("voice", H.DEFAULT_VOICE))
         if pack and isinstance(self.avatar, H.Avatar):
             new = H.Avatar(pack)
             self.side.replaceWidget(self.avatar, new)

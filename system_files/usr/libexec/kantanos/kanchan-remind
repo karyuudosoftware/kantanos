@@ -38,14 +38,14 @@ def busy_full_screen():
 
 
 def speak(cfg, text):
-    """In Kan-chan's voice (Piper, on this PC), when her voice has been downloaded."""
+    """In Kan-chan's voice (on this PC), when her voice has been downloaded."""
     try:
         import importlib.machinery
         import importlib.util
         loader = importlib.machinery.SourceFileLoader("kantanos_helper", "/usr/libexec/kantanos/helper")
         H = importlib.util.module_from_spec(importlib.util.spec_from_loader("kantanos_helper", loader))
         loader.exec_module(H)
-        voice = H.Voice(cfg.get("voice") or "en_US-hfc_female-medium")
+        voice = H.Voice(cfg.get("voice") or H.DEFAULT_VOICE)
         if not voice.ready():
             return
         path, _ = voice.synthesize(H.spoken(H.speakable(text), H.load_me())[:900])

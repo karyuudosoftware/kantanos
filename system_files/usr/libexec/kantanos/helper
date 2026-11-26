@@ -16,6 +16,7 @@ if a model were fooled it could only suggest one of these repairs, which the use
 """
 import json
 import glob
+import hashlib
 import os
 import re
 import shutil
@@ -47,6 +48,12 @@ PROFILE = os.path.join(os.path.dirname(CONF), "me.json")   # your name and how t
 DATA = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.join(HOME, ".local", "share")), "kantanos", "helper")
 CHARACTERS = [os.path.join(DATA, "characters"), "/usr/share/kantanos/helper/characters"]
 VOICE_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
+# Kokoro-82M (Apache 2.0), ONNX build from the kokoro-onnx project: model + voice styles
+KOKORO_BASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+KOKORO_FILES = {"kokoro-v1.0.fp16.onnx": "c1610a859f3bdea01107e73e50100685af38fff88f5cd8e5c56df109ec880204",
+                "voices-v1.0.bin": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"}
+KOKORO_PACE = 1.12                  # a little quicker than normal: lively
+DEFAULT_VOICE = "kokoro-jf_tebukuro"
 # Speech recognition (whisper.cpp "small", multilingual, compressed): English and Japanese
 STT_MODEL = "ggml-small-q5_1.bin"
 STT_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/" + STT_MODEL
@@ -470,31 +477,91 @@ class Avatar(QWidget):
 
 
 class Voice:
-    """Speech with Piper (on this PC). The voice model downloads once into the home folder."""
+    """Speech on this PC. Two engines: Kokoro (Kan-chan's voice, ids like "kokoro-jf_tebukuro")
+    and Piper (the other voices, ids like "en_US-hfc_female-medium"). The voice files download
+    once into the home folder, after asking."""
 
     def __init__(self, name):
         self.name = name
         self.dir = os.path.join(DATA, "voices")
-        self.model = os.path.join(self.dir, name + ".onnx")
+        self.kokoro = name.startswith("kokoro-")
+        if self.kokoro:
+            self.style = name.split("-", 1)[1]
+            self.files = [os.path.join(self.dir, f) for f in KOKORO_FILES]
+        else:
+            self.model = os.path.join(self.dir, name + ".onnx")
+            self.files = [self.model, self.model + ".json"]
         self.player = None
 
+    @property
+    def download_note(self):
+        """For the "Download it now?" question."""
+        if self.kokoro:
+            return "about 200 MB (from the Kokoro voice library)"
+        return "about 60 MB (from the Piper voice library)"
+
+    @property
+    def japanese(self):
+        """Can this voice read Japanese? (Kokoro's Japanese voices also speak English.)"""
+        return self.kokoro and self.style[:1] == "j"
+
     def ready(self):
-        return os.path.isfile(self.model) and os.path.isfile(self.model + ".json")
+        return all(os.path.isfile(f) for f in self.files)
 
     def download(self):
+        os.makedirs(self.dir, exist_ok=True)
+        if self.kokoro:
+            for fname, digest in KOKORO_FILES.items():
+                path = os.path.join(self.dir, fname)
+                if os.path.isfile(path):
+                    continue
+                urllib.request.urlretrieve(f"{KOKORO_BASE}/{fname}", path + ".part")
+                h = hashlib.sha256()
+                with open(path + ".part", "rb") as f:
+                    for block in iter(lambda: f.read(1 << 20), b""):
+                        h.update(block)
+                if h.hexdigest() != digest:
+                    os.remove(path + ".part")
+                    raise OSError("the download was incomplete")
+                os.replace(path + ".part", path)
+            return
         lang, speaker, quality = self.name.split("-")
         url = f"{VOICE_BASE}/{lang.split('_')[0]}/{lang}/{speaker}/{quality}/{self.name}.onnx"
-        os.makedirs(self.dir, exist_ok=True)
         for suffix in (".onnx.json", ".onnx"):
             tmp = self.model.replace(".onnx", suffix) + ".part"
             urllib.request.urlretrieve(url.replace(".onnx", suffix), tmp)
             os.replace(tmp, self.model.replace(".onnx", suffix))
 
+    _engine = None                  # Kokoro loaded once per program (about 1 second)
+    _engine_lock = threading.Lock()
+
+    def kokoro_wav(self, text, out):
+        from kokoro_onnx import Kokoro
+        with Voice._engine_lock:
+            if Voice._engine is None:
+                Voice._engine = Kokoro(*self.files)
+            japanese = has_japanese(text)
+            if not japanese:
+                # Her name the Japanese way ("Kahn-chahn"), not the English "Can-chan"
+                text = re.sub(r"(?<!\w)Kan-?chan(?!\w)", "Kahn-chahn", text, flags=re.I)
+            samples, rate = Voice._engine.create(text, voice=self.style, speed=KOKORO_PACE,
+                                                 lang="ja" if japanese else "en-us")
+        import numpy
+        pcm = (numpy.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes()
+        with wave.open(out, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(rate)
+            w.writeframes(pcm)
+
     def synthesize(self, text):
         """Returns (wav path, loudness per 40 ms) for the mouth to follow."""
         out = os.path.join(tempfile.gettempdir(), f"kantanos-helper-{os.getuid()}.wav")
-        subprocess.run([sys.executable, "-m", "piper", "-m", self.model, "-f", out],
-                       input=text, text=True, capture_output=True, timeout=120, check=True)
+        if self.kokoro:
+            self.kokoro_wav(text, out)
+        else:
+            subprocess.run([sys.executable, "-m", "piper", "-m", self.model, "-f", out],
+                           input=text, text=True, capture_output=True, timeout=120, check=True)
         with wave.open(out, "rb") as w:
             rate, width, frames = w.getframerate(), w.getsampwidth(), w.readframes(w.getnframes())
         step = int(rate * 0.04) * width
@@ -677,7 +744,7 @@ class Helper(QWidget):
                 pass
         self.char_name = info.get("name", "Helper")
         self.greeting = info.get("greeting", "")
-        self.voice = Voice(self.cfg.get("voice") or info.get("voice", "en_US-hfc_female-medium"))
+        self.voice = Voice(self.cfg.get("voice") or info.get("voice", DEFAULT_VOICE))
         self.avatar = Avatar(pack, "helper") if pack else None
         top = QHBoxLayout()
         top.setSpacing(16)
@@ -978,7 +1045,7 @@ class Helper(QWidget):
             self.say(self.greeting)
             return
         ok = QMessageBox.question(self, TITLE, f"{self.char_name}'s voice runs on this PC and needs a one-time "
-                                  "download of about 60 MB (from the Piper voice library). Download it now?",
+                                  f"download of {self.voice.download_note}. Download it now?",
                                   QMessageBox.Yes | QMessageBox.No)
         if ok != QMessageBox.Yes:
             self.talk.setChecked(False)
@@ -991,7 +1058,7 @@ class Helper(QWidget):
         text = spoken(speakable(text or ""), self.me)
         if not text or not (self.talk.isChecked() or force) or not self.voice.ready():
             return
-        if has_japanese(text) and self.voice.name.startswith("en"):
+        if has_japanese(text) and not self.voice.japanese:
             return                          # her English voice can't read Japanese; the text is shown
         self.in_thread("voice-synth", self.voice.synthesize, text[:900])
 

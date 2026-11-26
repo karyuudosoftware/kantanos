@@ -78,6 +78,10 @@ test -f /usr/lib/ollama/vulkan/libggml-vulkan.so
 # The Helper's voice: Piper text-to-speech on this PC (the voice itself downloads on first use)
 dnf5 -y install python3-piper-tts pipewire-utils
 python3 -c "import piper"
+# ...and Kan-chan's own voice: Kokoro (kokoro-onnx; onnxruntime, numpy and espeak-ng already
+# come with Piper). Its voice files download on first use, after asking.
+pip3 install --prefix=/usr --only-binary=:all: --root-user-action=ignore --no-cache-dir kokoro-onnx==0.4.7
+python3 -c "from kokoro_onnx import Kokoro"
 # ...and its ears: whisper.cpp speech recognition (CPU build bundled in the Python module;
 # the speech model downloads on first use, after asking)
 dnf5 -y install python3-pywhispercpp

@@ -167,7 +167,7 @@ def main():
         with open(os.path.join(OUT, name + ".svg"), "w", encoding="utf-8") as f:
             f.write(frame(e, m, x))
     with open(os.path.join(OUT, "character.json"), "w", encoding="utf-8") as f:
-        json.dump({"name": "Kan-chan", "voice": "en_US-hfc_female-medium",
+        json.dump({"name": "Kan-chan", "voice": "kokoro-jf_tebukuro",
                    "greeting": "Hi! I'm Kan-chan. Tell me what's wrong, and I'll take a look."}, f, indent=1, ensure_ascii=False)
     print("wrote", len(FRAMES), "frames to", os.path.normpath(OUT))
 
