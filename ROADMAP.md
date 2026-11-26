@@ -494,6 +494,13 @@ Steps:
       Also the plain-words "what KantanOS does and doesn't do" page for a public release:
       updates are automatic and can be undone; whether a game runs is up to its makers;
       one-time steps the person does themselves.
+- [ ] **Local AI sized to the PC's memory** (ready on the branch `ai-memory-fix`, not merged):
+      on the i5 with 8 GB, asking Kan-chan for a recipe with Steam and a browser open filled
+      memory to 97% and froze the PC. The branch gives PCs with 12 GB or less a smaller AI
+      working memory (4096 instead of 16384) and one conversation at a time, caps the AI at
+      about two-thirds of the memory (only the AI stops, never the PC), and has Kan-chan and the
+      Helper say "This PC ran out of memory for the AI. Close a game or the web browser" instead
+      of an error. Tested in the image; to try on the 8 GB PC before merging.
 - [ ] **Konsole: Ctrl+C / Ctrl+V copy and paste**, like Windows, instead of Ctrl+Shift+C / V.
       "Stop the running program" (what Ctrl+C means in a terminal) moves to **Ctrl+Break**, as
       in the Windows console, and also to Ctrl+Shift+C for keyboards without a Break key
