@@ -37,6 +37,15 @@ Window {
     property bool adding: false
     property bool making: false          // the AI is choosing
     property var suggestion: null        // the tile it made: shown before it's added
+    property bool finding: false         // looking up a web address by name
+    property var sites: []               // addresses found, to pick from
+    property string findNote: ""
+    function findSite() {
+        var q = addressField.text.trim() !== "" ? addressField.text : nameField.text
+        if (q.trim() === "" || finding) return
+        finding = true; sites = []; findNote = ""
+        backend.findSite(q)
+    }
     readonly property bool blocked: backend.busy !== "" || message !== "" || adding
 
     function clampCurrent() { if (current >= tileCount) current = tileCount - 1; if (current < 0) current = 0 }
@@ -45,6 +54,7 @@ Window {
         if (index === backend.modes.length) {
             adding = true; suggestion = null; making = false
             askField.text = ""; nameField.text = ""; addressField.text = ""
+            sites = []; findNote = ""; finding = false
             backend.prepareAdd(); askField.forceActiveFocus()
         }
         else backend.activate(index)
@@ -60,6 +70,12 @@ Window {
             root.making = false
             root.suggestion = s
             if (!s.none) { previewName.text = s.name; previewName.forceActiveFocus() }
+        }
+        function onSitesFound(found) {
+            if (!root.adding) return
+            root.finding = false
+            root.sites = found.items
+            root.findNote = found.note
         }
     }
 
@@ -437,10 +453,57 @@ Window {
                             Keys.onReturnPressed: addressField.forceActiveFocus()
                             Keys.onEscapePressed: cancelButton.clicked() }
                 Text { visible: root.adding; text: backend.text.address; color: root.ink; opacity: 0.8; font.pixelSize: 17 * root.u }
-                TextField { id: addressField; visible: root.adding; width: parent.width; font.pixelSize: 20 * root.u
-                            inputMethodHints: Qt.ImhUrlCharactersOnly
-                            Keys.onReturnPressed: saveButton.clicked()
-                            Keys.onEscapePressed: cancelButton.clicked() }
+                Row {
+                    visible: root.adding
+                    width: parent.width
+                    spacing: 12 * root.u
+                    TextField { id: addressField; width: parent.width - findButton.width - parent.spacing; font.pixelSize: 20 * root.u
+                                Keys.onReturnPressed: saveButton.clicked()
+                                Keys.onEscapePressed: cancelButton.clicked() }
+                    Button { id: findButton; text: backend.text.find; font.pixelSize: 18 * root.u
+                             enabled: (addressField.text.trim() !== "" || nameField.text.trim() !== "") && !root.finding
+                             onClicked: root.findSite() }
+                }
+                Text { visible: root.adding && root.sites.length === 0 && !root.finding && root.findNote === ""
+                       width: parent.width; text: backend.text.findHint; color: root.ink
+                       opacity: 0.65; font.pixelSize: 14 * root.u; wrapMode: Text.WordWrap }
+                Row {
+                    visible: root.adding && root.finding
+                    spacing: 12 * root.u
+                    BusyIndicator { running: parent.visible; width: 30 * root.u; height: 30 * root.u }
+                    Text { anchors.verticalCenter: parent.verticalCenter; text: backend.text.finding; color: root.ink; font.pixelSize: 16 * root.u }
+                }
+                Text { visible: root.adding && root.findNote !== ""; width: parent.width; text: root.findNote; color: root.ink
+                       font.pixelSize: 16 * root.u; wrapMode: Text.WordWrap }
+                Text { visible: root.adding && root.sites.length > 0; text: backend.text.findPick; color: root.ink
+                       font.pixelSize: 16 * root.u }
+                Column {
+                    visible: root.adding && root.sites.length > 0
+                    width: parent.width
+                    spacing: 4 * root.u
+                Repeater {
+                    model: root.adding ? root.sites : []
+                    delegate: Button {
+                        required property var modelData
+                        width: parent ? parent.width : 0
+                        flat: true
+                        font.pixelSize: 16 * root.u
+                        contentItem: Column {
+                            spacing: 2 * root.u
+                            Text { width: parent.width; text: modelData.name + (modelData.about !== "" ? "  ·  " + modelData.about : "")
+                                   color: root.ink; font.pixelSize: 16 * root.u; font.weight: Font.DemiBold; elide: Text.ElideRight }
+                            Text { width: parent.width; text: modelData.url; color: look.ACCENT_HEX
+                                   font.pixelSize: 14 * root.u; elide: Text.ElideRight }
+                        }
+                        onClicked: {
+                            addressField.text = modelData.url
+                            if (nameField.text.trim() === "") nameField.text = modelData.name
+                            root.sites = []
+                            saveButton.forceActiveFocus()
+                        }
+                    }
+                }
+                }
                 Row {
                     visible: root.adding
                     anchors.right: parent.right
@@ -454,6 +517,8 @@ Window {
                              visible: !preview.visible
                              enabled: nameField.text.trim() !== "" && addressField.text.trim() !== ""
                              onClicked: {
+                                 // a name rather than an address ("cbc news"): look it up instead
+                                 if (addressField.text.indexOf(".") < 0 && addressField.text.indexOf("://") < 0) { root.findSite(); return }
                                  if (backend.addShortcut(nameField.text, addressField.text)) { root.adding = false; keys.forceActiveFocus() }
                                  else addressField.forceActiveFocus()
                              } }

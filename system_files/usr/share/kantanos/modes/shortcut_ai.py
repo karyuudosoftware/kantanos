@@ -16,6 +16,7 @@ import os
 import re
 import shlex
 import sys
+import time
 import urllib.parse
 
 HOME = os.path.expanduser("~")
@@ -71,6 +72,8 @@ SITES = {
 # Apps from Flathub that are safe for a family PC, installed the first time the tile is used.
 CATALOGUE = {
     "com.spotify.Client": ("Spotify", "tv", "music, podcasts"),
+    "com.plexamp.Plexamp": ("Plexamp", "tv", "music from your Plex server"),
+    "tv.plex.PlexDesktop": ("Plex", "tv", "films, shows and music from your Plex server"),
     "com.discordapp.Discord": ("Discord", "web", "voice and text chat for friends and gaming groups"),
     "us.zoom.Zoom": ("Zoom", "web", "video calls and meetings"),
     "org.signal.Signal": ("Signal", "web", "private messages and calls"),
@@ -287,6 +290,22 @@ class Choices:
             return web_tile(url, name, comment, icon or "web")
         return None
 
+    def named(self, request):
+        """What they typed is simply the name of one of the choices ("Plexamp", "Steam"):
+        that one, straight away, with no AI (the AI on a PC without a graphics card can take
+        minutes). Installed apps first, then Steam games, websites, apps to install."""
+        words = set(tokens(request))
+        if not words:
+            return None
+        cands = [(f"app:{k}", a["name"]) for k, a in self.apps.items()]
+        cands += [(f"steam:{k}", g["name"]) for k, g in self.games.items()]
+        cands += [(f"site:{k}", s[0]) for k, s in SITES.items()]
+        cands += [(f"install:{k}", c[0]) for k, c in self.install.items()]
+        for choice, name in cands:
+            if words == set(tokens(name)):
+                return self.tile(choice)
+        return None
+
     def match(self, request):
         """Without an AI: the choice whose name and words best match what they typed."""
         words = set(tokens(request))
@@ -356,7 +375,12 @@ def suggest(request, choices, ask=None):
     request = re.sub(r"\s+", " ", request or "").strip()[:200]
     if not request:
         return {"none": ""}
+    t = choices.named(request)
+    if t:
+        t["by"] = "words"
+        return t
     if ask:
+        started = time.monotonic()
         try:
             ans = parse(ask(PROMPT.format(request=json.dumps(request, ensure_ascii=False), choices=choices.text())))
         except Exception:  # noqa: BLE001 - any AI failure falls back to matching
@@ -366,10 +390,13 @@ def suggest(request, choices, ask=None):
         t = choices.tile(ans.get("choice"), ans.get("url"), ans.get("name"), ans.get("comment"), ans.get("icon"))
         if t and not related(request, t["about"]):
             # Nothing in common in words: the AI may have picked something merely installed.
-            try:
-                fits = parse(ask(CHECK.format(request=json.dumps(request, ensure_ascii=False), about=t["about"])))
-            except Exception:  # noqa: BLE001
-                fits = {}
+            # A second question only if the first was quick (a slow AI would double the wait).
+            fits = {}
+            if time.monotonic() - started < 20:
+                try:
+                    fits = parse(ask(CHECK.format(request=json.dumps(request, ensure_ascii=False), about=t["about"])))
+                except Exception:  # noqa: BLE001
+                    pass
             if fits.get("fits") is not True:
                 t = None
         if t:
@@ -399,6 +426,56 @@ def write_mode(user_dir, tile):
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
     return path
+
+
+def find_sites(query, lang="en", get=None):
+    """Official web addresses for a name ("CBC News" -> https://www.cbc.ca/news), for people who
+    don't know the address. From Wikidata, the open data behind Wikipedia: each entry's
+    "official website", so look-alike or unofficial sites don't turn up. Only the words typed
+    are sent. Returns [{"name", "about", "url"}] (best first), or raises OSError when it can't
+    reach Wikidata; "busy" in the message means it asked too often and should wait a moment."""
+    import urllib.error
+    import urllib.request
+    query = re.sub(r"\s+", " ", query or "").strip()[:100]
+    if not query:
+        return []
+    api = "https://www.wikidata.org/w/api.php?"
+
+    def fetch(params):
+        req = urllib.request.Request(api + urllib.parse.urlencode(params),
+                                     headers={"User-Agent": "KantanOS-shortcuts/1.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            raise OSError("busy" if e.code == 429 else f"HTTP {e.code}") from e
+        except ValueError as e:
+            raise OSError("bad reply") from e
+
+    get = get or fetch
+    lang = lang if re.fullmatch(r"[a-z]{2,3}", lang or "") and lang not in ("c",) else "en"
+    ids = []
+    for tongue in dict.fromkeys((lang, "en")):      # the PC's language, then English
+        found = get({"action": "wbsearchentities", "search": query, "language": tongue, "uselang": lang,
+                     "type": "item", "limit": 10, "format": "json"})
+        ids = [e["id"] for e in found.get("search", []) if ID_RE.match(str(e.get("id", "")))]
+        if ids:
+            break
+    if not ids:
+        return []
+    data = get({"action": "wbgetentities", "ids": "|".join(ids), "props": "claims|labels|descriptions",
+                "languages": f"{lang}|en", "format": "json"})
+    out, seen = [], set()
+    for i in ids:
+        e = data.get("entities", {}).get(i, {})
+        for claim in e.get("claims", {}).get("P856", [])[:1]:
+            url = str(claim.get("mainsnak", {}).get("datavalue", {}).get("value", ""))
+            if not re.match(r"^https?://[^\s'\"\`$<>]+$", url) or url.rstrip("/") in seen:
+                continue
+            seen.add(url.rstrip("/"))
+            text = lambda k: (e.get(k, {}).get(lang) or e.get(k, {}).get("en") or {}).get("value", "")
+            out.append({"name": clean(text("labels"), 60) or url, "about": clean(text("descriptions"), 100), "url": url})
+    return out[:4]
 
 
 if __name__ == "__main__":
