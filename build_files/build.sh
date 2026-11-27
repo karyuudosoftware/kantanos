@@ -56,8 +56,12 @@ done
 # Fedora's package lags months behind, and models from Ollama's library then refuse to
 # download ("requires a newer version of Ollama"). Checked against the release's
 # sha256sum.txt. Only the CPU and Vulkan parts are kept; the CUDA parts (2.5 GB) aren't used.
-OLLAMA_TAG=$(curl -fsSL --retry 3 https://api.github.com/repos/ollama/ollama/releases/latest \
-    | python3 -c "import json, sys; print(json.load(sys.stdin)[\"tag_name\"])")
+# The newest version comes from where the "latest" page redirects to: GitHub's API refuses
+# builders that ask too often (403, a shared limit for all of GitHub's build machines).
+OLLAMA_LATEST=$(curl -fsSLI --retry 3 -o /dev/null -w '%{url_effective}' \
+    https://github.com/ollama/ollama/releases/latest)
+OLLAMA_TAG=${OLLAMA_LATEST##*/}
+case "$OLLAMA_TAG" in v[0-9]*) ;; *) echo "Ollama version not found ($OLLAMA_LATEST)"; exit 1 ;; esac
 OLLAMA_DL="https://github.com/ollama/ollama/releases/download/$OLLAMA_TAG"
 curl -fsSL --retry 3 -o /tmp/ollama.tar.zst "$OLLAMA_DL/ollama-linux-amd64.tar.zst"
 curl -fsSL --retry 3 -o /tmp/ollama-sums.txt "$OLLAMA_DL/sha256sum.txt"
