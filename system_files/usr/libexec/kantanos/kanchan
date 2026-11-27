@@ -768,7 +768,7 @@ class Companion(QWidget):
         self.mail_talk = mail.Talk(self.cfg.get("kanchan_mail_sign", self.me.get("name", "")))
         self.setWindowTitle(TITLE)
         self.setWindowIcon(QIcon.fromTheme("kantanos-kanchan", QIcon.fromTheme("face-smile")))
-        self.resize(1000, 760)
+        self.resize(1000, 820)
 
         pack = H.character_dir(self.cfg.get("character", "kan-chan"))
         info = {}
@@ -790,9 +790,8 @@ class Companion(QWidget):
 
         # left: Kan-chan herself
         side = self.side = QVBoxLayout()
-        self.avatar = H.Avatar(pack) if pack else QLabel()
-        if pack:
-            self.avatar.setFixedSize(240, 300)
+        self.avatar = H.Avatar(pack, full=True) if pack else QLabel()    # all of her, like the Helper
+        self.avatar_size(False)
         side.addWidget(self.avatar, 0, Qt.AlignHCenter)
         name = self.name_label = QLabel(self.char_name)
         f = QFont(); f.setPointSizeF(f.pointSizeF() * 1.7); f.setBold(True)
@@ -848,13 +847,15 @@ class Companion(QWidget):
         self.eye_box.hide()
         side.addWidget(self.eye_box)
         side.addSpacing(6)
-        for text, icon, fn in (("What I remember", "view-list-details", self.open_memory),
-                               ("Email and calendar…", "mail-message", self.open_mail),
-                               ("Make a character…", "user-identity", self.make_character),
-                               ("AI settings", "configure", self.open_settings)):
+        buttons = QGridLayout()             # two by two, so her whole height fits above them
+        for i, (text, icon, fn) in enumerate((("What I remember", "view-list-details", self.open_memory),
+                                              ("Email and calendar…", "mail-message", self.open_mail),
+                                              ("Make a character…", "user-identity", self.make_character),
+                                              ("AI settings", "configure", self.open_settings))):
             b = QPushButton(QIcon.fromTheme(icon), text)
             b.clicked.connect(fn)
-            side.addWidget(b)
+            buttons.addWidget(b, i // 2, i % 2)
+        side.addLayout(buttons)
         side.addStretch()
         self.ai_label = QLabel()
         self.ai_label.setWordWrap(True)
@@ -1514,7 +1515,11 @@ class Companion(QWidget):
 
     def avatar_size(self, small):
         """A smaller Kan-chan while the camera preview shows, so the window fits small screens."""
-        if isinstance(self.avatar, H.Avatar):
+        if not isinstance(self.avatar, H.Avatar):
+            return
+        if self.avatar.full:                # head to shoes
+            self.avatar.setFixedSize(*((130, 300) if small else (190, 440)))
+        else:                               # a pack without full-length pictures: head to hips
             self.avatar.setFixedSize(*((168, 210) if small else (240, 300)))
 
     def stop_eyes(self):
@@ -1685,7 +1690,7 @@ class Companion(QWidget):
         self.voice.stop()
         self.voice = H.Voice(self.cfg.get("voice") or info.get("voice", H.DEFAULT_VOICE))
         if pack and isinstance(self.avatar, H.Avatar):
-            new = H.Avatar(pack)
+            new = H.Avatar(pack, full=True)
             self.side.replaceWidget(self.avatar, new)
             self.avatar.deleteLater()
             self.avatar = new
@@ -1954,6 +1959,10 @@ def self_test():
     MailSetup(w)
     w.confirm_card({"kind": "bin", "yes": "Move to the bin", "no": "Keep it"})
     app.processEvents()
+    if os.environ.get("KANTAN_WINDOW_SHOT"):       # a picture of the window, for checking the layout
+        w.show()
+        app.processEvents()
+        w.grab().save(os.environ["KANTAN_WINDOW_SHOT"])
     print("kanchan self-test ok")
 
 
