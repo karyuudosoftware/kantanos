@@ -522,7 +522,7 @@ Steps:
       - Blinking and talking must not make her hair or face "wiggle" (seen in the doctor
         outfit): the face patches have to line up pixel for pixel with the still drawing and
         change only the eyes and mouth, never the hair or face outline around them.
-      - The Kan-chan app shows her full body, like the Helper (text beside her, buttons below).
+      - Done: the Kan-chan app shows her full body, like the Helper (buttons two by two below her).
 - [ ] Idea, later: an optional **Health notebook** tied to Kan-chan. One profile per person
       (for example a parent). Explains a condition, a medicine or a word from a letter in plain
       words; reads blood test results from a photo or PDF into dated values with simple charts
