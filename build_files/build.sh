@@ -346,6 +346,13 @@ sed -i -e 's|^Exec=waydroid$|Exec=kantan-android|' -e 's|^Exec=waydroid init --c
     /usr/share/applications/Waydroid.desktop
 grep -q '^Exec=kantan-android$' /usr/share/applications/Waydroid.desktop
 grep -q '^Exec=kantan-android setup$' /usr/share/applications/Waydroid.desktop
+# ...and it's kept out of the menu and search: most Play Store games refuse Waydroid (Google's
+# integrity check, phone-only processors), so offering "Android apps" only disappoints. It still
+# works for anyone who runs kantan-android or double-clicks an .apk.
+for f in /usr/share/applications/*[Ww]aydroid*.desktop; do
+    grep -q '^NoDisplay=' "$f" && sed -i 's/^NoDisplay=.*/NoDisplay=true/' "$f" || sed -i '/^\[Desktop Entry\]/a NoDisplay=true' "$f"
+done
+grep -q '^NoDisplay=true' /usr/share/applications/Waydroid.desktop
 
 # Installed systems get the Windows-style local hardware clock once (the installer writes UTC).
 systemctl enable kantanos-local-clock.service

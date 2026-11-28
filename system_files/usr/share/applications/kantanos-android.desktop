@@ -6,6 +6,9 @@ Comment=Run Android apps in their own windows; set up the first time
 Exec=kantan-android
 Icon=waydroid
 Categories=Utility;
+# Hidden (Nov 2026): most Play Store games refuse Waydroid, so it isn't offered; still works
+# for anyone who runs kantan-android or double-clicks an .apk.
+NoDisplay=true
 Keywords=android;apk;waydroid;phone;app;play store;
 Actions=setup;
 
