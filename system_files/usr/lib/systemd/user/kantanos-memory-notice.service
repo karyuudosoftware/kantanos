@@ -1,0 +1,14 @@
+[Unit]
+Description=Say in plain words when an app was closed because memory ran out
+Documentation=file:///usr/libexec/kantanos/memory-notice
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/libexec/kantanos/memory-notice
+Restart=on-failure
+RestartSec=30
+Nice=5
+
+[Install]
+WantedBy=graphical-session.target

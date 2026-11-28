@@ -1,0 +1,101 @@
+#!/usr/bin/python3
+"""KantanOS: says in plain words when an app was closed because the PC ran out of memory.
+
+When memory runs out, systemd-oomd (or the kernel) closes the app using the most of it so
+the rest of the PC keeps working. On its own that looks like the app crashed. This watches
+the person's own log for those closings and shows a notification:
+"Firefox was closed: the PC ran out of memory".
+
+  memory-notice               watch (run by kantanos-memory-notice.service)
+  memory-notice --self-test
+"""
+import configparser
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+KILLED = re.compile(r"systemd-oomd killed|killed by (the )?OOM killer|killed by systemd-oomd", re.I)
+
+
+def desktop_name(desktop_id):
+    """The app's own name from its .desktop file (Firefox, Steam), or '' if not found."""
+    dirs = [os.path.expanduser("~/.local/share")] + \
+        os.environ.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share").split(":") + \
+        ["/var/lib/flatpak/exports/share", os.path.expanduser("~/.local/share/flatpak/exports/share")]
+    for d in dirs:
+        path = os.path.join(d, "applications", desktop_id + ".desktop")
+        if os.path.isfile(path):
+            cp = configparser.ConfigParser(interpolation=None, strict=False)
+            try:
+                cp.read(path, encoding="utf-8")
+                return cp.get("Desktop Entry", "Name", fallback="")
+            except (configparser.Error, OSError, UnicodeDecodeError):
+                return ""
+    return ""
+
+
+def app_name(unit, lookup=desktop_name):
+    """'app-flatpak-org.mozilla.firefox-1234.scope' -> 'Firefox'. '' when it isn't an app."""
+    m = re.match(r"app-(?:flatpak-)?(?:[a-z]+-)?(.+?)(?:[@-][0-9a-f]+)?\.(?:scope|service)$", unit)
+    if not m:
+        return ""
+    desktop_id = m.group(1).replace("\\x2d", "-")
+    for candidate in (desktop_id, desktop_id.split("@")[0]):
+        name = lookup(candidate)
+        if name:
+            return name
+    return desktop_id.rsplit(".", 1)[-1].replace("-", " ").replace("_", " ").title()
+
+
+def message(name):
+    if name:
+        return (f"{name} was closed: the PC ran out of memory",
+                f"KantanOS closed {name} so everything else keeps working. Closing a game or "
+                "some browser tabs gives the PC more room; then you can open it again.")
+    return ("Something was closed: the PC ran out of memory",
+            "KantanOS closed the program using the most memory so everything else keeps working. "
+            "Closing a game or some browser tabs gives the PC more room.")
+
+
+def self_test():
+    names = {"org.mozilla.firefox": "Firefox", "steam": "Steam"}.get
+    assert app_name("app-flatpak-org.mozilla.firefox-12345.scope", names) == "Firefox"
+    assert app_name("app-steam@a1b2c3.service", names) == "Steam"
+    assert app_name("app-org.kde.dolphin-4567.scope", lambda _: "") == "Dolphin"
+    assert app_name("plasma-plasmashell.service", names) == ""
+    assert KILLED.search("app-steam@1.service: systemd-oomd killed 12 process(es) in this unit.")
+    assert KILLED.search("A process of this unit has been killed by the OOM killer.")
+    assert "Firefox" in message("Firefox")[0] and "memory" in message("")[0]
+    print("ok")
+
+
+def main():
+    if sys.argv[1:2] == ["--self-test"]:
+        return self_test()
+    last = {}
+    proc = subprocess.Popen(["journalctl", "--user", "-f", "-n", "0", "-o", "json"],
+                            stdout=subprocess.PIPE, text=True)
+    for line in proc.stdout:
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        text = entry.get("MESSAGE")
+        if not isinstance(text, str) or not KILLED.search(text):
+            continue
+        unit = entry.get("USER_UNIT") or entry.get("UNIT") or text.split(":", 1)[0]
+        name = app_name(unit)
+        if time.monotonic() - last.get(name, -999) < 60:      # one notice per app per minute
+            continue
+        last[name] = time.monotonic()
+        title, body = message(name)
+        subprocess.run(["notify-send", "-a", "KantanOS", "-u", "critical", "-i", "dialog-warning",
+                        title, body], timeout=10)
+    return proc.wait()
+
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)

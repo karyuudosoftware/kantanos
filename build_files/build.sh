@@ -162,6 +162,12 @@ systemctl --global enable kantanos-tv-recorder.service
 # appear in Steam's Game Mode by themselves (watched for every account; idle otherwise).
 systemctl --global enable kantanos-games-sync.path
 
+# Running out of memory: systemd-oomd closes the app using the most of it sooner (the
+# settings in /usr/lib/systemd/oomd.conf.d/20-kantanos.conf and the -.slice / user@ drop-ins)
+# instead of the whole PC freezing, and this says which app it was, in plain words.
+systemctl --global enable kantanos-memory-notice.service
+systemctl is-enabled systemd-oomd.service
+
 # Virus scanning: ClamAV, its list of known viruses kept up to date in the background, and
 # "Scan for viruses" in Files (/usr/libexec/kantanos/virus-scan).
 dnf5 -y install clamav clamav-update
