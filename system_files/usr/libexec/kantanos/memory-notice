@@ -1,10 +1,13 @@
 #!/usr/bin/python3
-"""KantanOS: says in plain words when an app was closed because the PC ran out of memory.
+"""KantanOS: warns in plain words when memory is nearly full, and says when an app was closed
+because it ran out.
 
 When memory runs out, systemd-oomd (or the kernel) closes the app using the most of it so
-the rest of the PC keeps working. On its own that looks like the app crashed. This watches
-the person's own log for those closings and shows a notification:
-"Firefox was closed: the PC ran out of memory".
+the rest of the PC keeps working (/usr/lib/systemd/oomd.conf.d/20-kantanos.conf: swap 85%
+full, or 10 s of heavy stalling). Two notices:
+- before: "Memory is almost full. Save your work: if it fills up, Firefox will be closed",
+  well ahead of those limits, so there's time to save and close something;
+- after: "Firefox was closed: the PC ran out of memory", so it doesn't look like a crash.
 
   memory-notice               watch (run by kantanos-memory-notice.service)
   memory-notice --self-test
@@ -15,7 +18,14 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
+
+# Warn at these (the automatic closing is at swap 85% / heavy stalling for 10 s).
+WARN_SWAP, WARN_AVAIL, WARN_STALL = 0.60, 0.06, 10.0
+# ...and warn again only after memory has properly recovered (or 5 minutes later).
+CLEAR_SWAP, CLEAR_AVAIL, CLEAR_STALL = 0.45, 0.15, 2.0
+REPEAT_AFTER = 300
 
 KILLED = re.compile(r"systemd-oomd killed|killed by (the )?OOM killer|killed by systemd-oomd", re.I)
 
@@ -60,7 +70,111 @@ def message(name):
             "Closing a game or some browser tabs gives the PC more room.")
 
 
+def memory_state(meminfo="/proc/meminfo", pressure="/proc/pressure/memory"):
+    """(free share of memory, used share of swap, % of time fully stalled for memory)."""
+    info = {}
+    with open(meminfo) as f:
+        for line in f:
+            key, _, rest = line.partition(":")
+            info[key] = int(rest.split()[0])
+    avail = info.get("MemAvailable", 0) / max(1, info.get("MemTotal", 1))
+    swap_total = info.get("SwapTotal", 0)
+    swap = (swap_total - info.get("SwapFree", 0)) / swap_total if swap_total else 0.0
+    stall = 0.0
+    try:
+        with open(pressure) as f:
+            for line in f:
+                if line.startswith("full"):
+                    stall = float(re.search(r"avg10=([\d.]+)", line).group(1))
+    except (OSError, AttributeError):
+        pass
+    return avail, swap, stall
+
+
+def nearly_full(avail, swap, stall):
+    return swap >= WARN_SWAP or avail <= WARN_AVAIL or stall >= WARN_STALL
+
+
+def recovered(avail, swap, stall):
+    return swap < CLEAR_SWAP and avail > CLEAR_AVAIL and stall < CLEAR_STALL
+
+
+def largest_app(root=None, lookup=desktop_name):
+    """The name of the open app using the most memory (memory + swap), or ''."""
+    root = root or f"/sys/fs/cgroup/user.slice/user-{os.getuid()}.slice/user@{os.getuid()}.service/app.slice"
+    best, best_use = "", 0
+    try:
+        units = os.listdir(root)
+    except OSError:
+        return ""
+    for unit in units:
+        use = 0
+        for part in ("memory.current", "memory.swap.current"):
+            try:
+                with open(os.path.join(root, unit, part)) as f:
+                    use += int(f.read().strip() or 0)
+            except (OSError, ValueError):
+                pass
+        name = app_name(unit, lookup)
+        if name and use > best_use:
+            best, best_use = name, use
+    return best
+
+
+def warning(name):
+    title = "Memory is almost full: save your work"
+    if name:
+        return title, (f"If it fills up, KantanOS will close {name} (it's using the most memory) "
+                       "to keep the PC working. Save what you're doing, then close a game, an app "
+                       "or some browser tabs.")
+    return title, ("If it fills up, KantanOS will close the app using the most memory to keep the "
+                   "PC working. Save what you're doing, then close a game, an app or some browser tabs.")
+
+
+def notify(title, body):
+    try:
+        subprocess.run(["notify-send", "-a", "KantanOS", "-u", "critical", "-i", "dialog-warning",
+                        title, body], timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def watch_memory():
+    """Every 2 seconds: warn once when memory is nearly full, again only after it recovered."""
+    warned_at = None
+    while True:
+        try:
+            state = memory_state()
+        except OSError:
+            state = (1.0, 0.0, 0.0)
+        if warned_at is None and nearly_full(*state):
+            warned_at = time.monotonic()
+            notify(*warning(largest_app()))
+        elif warned_at is not None and (recovered(*state) or
+                                        (time.monotonic() - warned_at > REPEAT_AFTER and not nearly_full(*state))):
+            warned_at = None
+        time.sleep(2)
+
+
 def self_test():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        mi, pr = os.path.join(d, "meminfo"), os.path.join(d, "pressure")
+        open(mi, "w").write("MemTotal: 8000000 kB\nMemAvailable: 400000 kB\nSwapTotal: 4000000 kB\n"
+                            "SwapFree: 1000000 kB\n")
+        open(pr, "w").write("some avg10=30.00 avg60=1 avg300=0 total=1\nfull avg10=12.50 avg60=1 avg300=0 total=1\n")
+        avail, swap, stall = memory_state(mi, pr)
+        assert abs(avail - 0.05) < 1e-9 and abs(swap - 0.75) < 1e-9 and stall == 12.5
+        assert nearly_full(avail, swap, stall) and not recovered(avail, swap, stall)
+        assert not nearly_full(0.40, 0.10, 0.0) and recovered(0.40, 0.10, 0.0)
+        assert nearly_full(0.30, 0.62, 0.0) and nearly_full(0.30, 0.0, 11.0)
+        for unit, mem in (("app-flatpak-org.mozilla.firefox-1.scope", 3_000_000_000),
+                          ("app-steam@2.service", 1_000_000_000), ("kanchan.scope", 9_000_000_000)):
+            os.makedirs(os.path.join(d, "app", unit))
+            open(os.path.join(d, "app", unit, "memory.current"), "w").write(str(mem))
+        names = {"org.mozilla.firefox": "Firefox", "steam": "Steam"}.get
+        assert largest_app(os.path.join(d, "app"), names) == "Firefox"
+    assert "Firefox" in warning("Firefox")[1] and "save" in warning("")[0]
     names = {"org.mozilla.firefox": "Firefox", "steam": "Steam"}.get
     assert app_name("app-flatpak-org.mozilla.firefox-12345.scope", names) == "Firefox"
     assert app_name("app-steam@a1b2c3.service", names) == "Steam"
@@ -75,6 +189,7 @@ def self_test():
 def main():
     if sys.argv[1:2] == ["--self-test"]:
         return self_test()
+    threading.Thread(target=watch_memory, daemon=True).start()
     last = {}
     proc = subprocess.Popen(["journalctl", "--user", "-f", "-n", "0", "-o", "json"],
                             stdout=subprocess.PIPE, text=True)
@@ -91,9 +206,7 @@ def main():
         if time.monotonic() - last.get(name, -999) < 60:      # one notice per app per minute
             continue
         last[name] = time.monotonic()
-        title, body = message(name)
-        subprocess.run(["notify-send", "-a", "KantanOS", "-u", "critical", "-i", "dialog-warning",
-                        title, body], timeout=10)
+        notify(*message(name))
     return proc.wait()
 
 
