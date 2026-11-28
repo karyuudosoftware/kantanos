@@ -99,6 +99,47 @@ class Reader:
             self.doing, self.detail = STAGES["Deploying"], ""
 
 
+NOTES_LABEL = "org.kantanos.whats-new"
+NOTES_FILE = "/usr/share/kantanos/whats-new.json"     # the notes of the KantanOS running now
+
+
+def image_address(os_release="/usr/lib/os-release"):
+    """Where this PC's updates come from (KANTAN_IMAGE), or ''."""
+    try:
+        for line in open(os_release, encoding="utf-8"):
+            if line.startswith("KANTAN_IMAGE="):
+                return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return ""
+
+
+def new_notes(inspect_json, local_file=NOTES_FILE):
+    """The plain-words notes in the update that this PC doesn't have yet, from `skopeo
+    inspect` of the published image (its org.kantanos.whats-new label). None: unknown."""
+    try:
+        labels = json.loads(inspect_json).get("Labels") or {}
+        notes = json.loads(labels.get(NOTES_LABEL, "null"))
+    except (ValueError, AttributeError):
+        return None
+    if not isinstance(notes, list):
+        return None
+    try:
+        have = {n.get("id") for n in json.load(open(local_file, encoding="utf-8"))}
+    except (OSError, ValueError, AttributeError):
+        have = set()
+    return [n for n in notes if isinstance(n, dict) and n.get("title") and n.get("id") not in have]
+
+
+def notes_html(notes):
+    """What the window shows under the bar."""
+    from html import escape
+    if not notes:
+        return "<b>In this update:</b> small fixes and safety updates from Fedora and Bazzite."
+    items = "".join(f"<li><b>{escape(n['title'])}</b>: {escape(n.get('text', ''))}</li>" for n in notes[:6])
+    return f"<b>What's in this update:</b><ul style='margin-left:-20px'>{items}</ul>"
+
+
 def restart_waiting():
     """True when a new KantanOS has been downloaded and waits for the next start."""
     try:
@@ -128,6 +169,20 @@ def self_test():
     assert r.percent == 50, r.percent
     assert r.failed == ["Updating your apps"], r.failed
     assert "not json at all" in r.details
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        local = os.path.join(d, "notes.json")
+        json.dump([{"id": "a", "title": "Old"}], open(local, "w"))
+        label = json.dumps([{"id": "b", "title": "Fewer freezes", "text": "Closes one app <not all>."},
+                            {"id": "a", "title": "Old"}])
+        got = new_notes(json.dumps({"Labels": {NOTES_LABEL: label}}), local)
+        assert [n["id"] for n in got] == ["b"], got
+        assert "Fewer freezes" in notes_html(got) and "&lt;not all&gt;" in notes_html(got)
+        assert new_notes(json.dumps({"Labels": {}}), local) is None
+        assert "Fedora" in notes_html([])
+        rel = os.path.join(d, "os-release")
+        open(rel, "w").write('NAME="KantanOS"\nKANTAN_IMAGE="ghcr.io/x/kantanos"\n')
+        assert image_address(rel) == "ghcr.io/x/kantanos"
     print("ok")
 
 
@@ -136,7 +191,7 @@ def main():
         return self_test()
     replay = sys.argv[sys.argv.index("--replay") + 1] if "--replay" in sys.argv else None
 
-    from PySide6.QtCore import QProcess, QTimer
+    from PySide6.QtCore import QProcess, Qt, QTimer
     from PySide6.QtGui import QFont, QIcon
     from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QPlainTextEdit, QProgressBar,
                                    QPushButton, QVBoxLayout, QWidget)
@@ -164,6 +219,11 @@ def main():
     bar.setTextVisible(True)
     note = QLabel()
     note.setWordWrap(True)
+    # What's in this update, in plain words (hidden until there's a new KantanOS to describe)
+    whatsnew = QLabel()
+    whatsnew.setWordWrap(True)
+    whatsnew.setTextFormat(Qt.RichText)
+    whatsnew.setVisible(False)
     details = QPlainTextEdit()
     details.setReadOnly(True)
     details.setVisible(False)
@@ -180,7 +240,7 @@ def main():
     close.setToolTip("The update carries on in the background")
     row.addWidget(restart)
     row.addWidget(close)
-    for w in (head, sub, bar, note):
+    for w in (head, sub, bar, note, whatsnew):
         lay.addWidget(w)
     lay.addLayout(row)
     lay.addWidget(details)
@@ -188,9 +248,30 @@ def main():
     restart.clicked.connect(lambda: subprocess.Popen(["systemctl", "reboot"]))
 
     r = Reader()
-    state = {"buf": b"", "shown": 0}
+    state = {"buf": b"", "shown": 0, "notes": None}
+
+    # Ask the update address what the new KantanOS brings (a small read, nothing is downloaded)
+    address = image_address()
+    if address and not replay:
+        notes_proc = QProcess(win)
+
+        def got_notes(_code, _status):
+            state["notes"] = new_notes(bytes(notes_proc.readAllStandardOutput()).decode("utf-8", "replace"))
+            refresh()
+        notes_proc.finished.connect(got_notes)
+        notes_proc.start("skopeo", ["inspect", "--no-tags", "--retry-times", "2", f"docker://{address}:latest"])
+    elif replay:
+        state["notes"] = new_notes(json.dumps({"Labels": {NOTES_LABEL: open(NOTES_FILE).read()}}), "/dev/null") \
+            if os.path.exists(NOTES_FILE) else []
 
     def refresh():
+        # Shown once a new KantanOS is on its way: named changes, or the plain "small fixes"
+        notes = state["notes"]
+        system = r.doing in STAGES.values()
+        if (notes or (notes is not None and system)) and not whatsnew.isVisible():
+            whatsnew.setText(notes_html(notes))
+            whatsnew.setVisible(True)
+            win.adjustSize()
         head.setText(r.doing + ("…" if not r.doing.endswith("…") else ""))
         note.setText(r.detail)
         if r.percent is not None:
@@ -217,6 +298,7 @@ def main():
             bar.setValue(100)
             head.setText("Everything is up to date")
             sub.setText("There was nothing new this time, or it has all been installed already.")
+            whatsnew.setVisible(False)
         else:
             head.setText("Some updates didn't finish")
             what = ", ".join(r.failed) if r.failed else "the update"

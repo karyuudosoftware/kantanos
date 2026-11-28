@@ -47,3 +47,7 @@ You can't rebuild the image on KantanOS the way the Windows PC does, but you can
 - The KantanOS Helper's AI may only pick repairs from its fixed list (`FIXES` in
   `usr/libexec/kantanos/helper`); keep it that way.
 - Credit is a plain-text "Built with Claude".
+- A change a person would notice gets a short plain-words note at the top of
+  `system_files/usr/share/kantanos/whats-new.json` (new `id`, `title`, one-sentence `text`).
+  The Updates window lists the notes a PC doesn't have yet under its progress bar; small fixes
+  stay out, so the list means something.

@@ -230,6 +230,16 @@ if [ -n "$KANTAN_IMAGE" ]; then
             > /etc/containers/registries.d/kantanos.yaml
     fi
 fi
+# The menu's update entry (Bazzite Updater, with its console of raw output) opens KantanOS
+# Updates instead: a progress bar and, under it, what's in the update in plain words
+# (usr/share/kantanos/whats-new.json, read from the published image's label).
+BU=/usr/share/applications/io.github.rfrench3.bazzite-updater.desktop
+if [ -f "$BU" ]; then
+    sed -i -e '/^Name\[/d' -e '/^Comment\[/d' -e '/^Keywords\[/d' \
+        -e 's|^Name=.*|Name=Updates|' -e 's|^Comment=.*|Comment=Check for updates and see what they bring|' \
+        -e 's|^Exec=.*|Exec=/usr/libexec/kantanos/update-window|' -e 's|^Icon=.*|Icon=system-software-update|' "$BU"
+    grep -q '^Exec=/usr/libexec/kantanos/update-window$' "$BU"
+fi
 systemctl enable uupd.timer
 
 ### 4. Desktop defaults -------------------------------------------------------

@@ -1,0 +1,20 @@
+[
+  {"id": "2026-11-28-memory-warning",
+   "title": "A warning before memory runs out",
+   "text": "When the PC's memory is nearly full, a message says so and names the app that would be closed, so there's time to save your work."},
+  {"id": "2026-11-27-memory-guard",
+   "title": "Fewer freezes",
+   "text": "When the PC runs out of memory, KantanOS closes the app using the most of it, instead of the whole PC freezing, and says which app it was."},
+  {"id": "2026-11-28-wakaru-tv",
+   "title": "Japanese TV on the start screen",
+   "text": "Wakaru TV has its own tile and menu entry. The first time, it downloads itself."},
+  {"id": "2026-11-27-android-hidden",
+   "title": "Android apps tidied away",
+   "text": "Android apps are no longer in the menu or Welcome: most Play Store games don't work with them."},
+  {"id": "2026-11-26-shortcut-lookup",
+   "title": "Easier shortcuts",
+   "text": "Making a shortcut on the start screen: type a website's name (\"CBC News\") and press Look it up, no web address needed."},
+  {"id": "2026-11-26-kanchan-full-body",
+   "title": "Kan-chan from head to toe",
+   "text": "The Kan-chan app shows her whole body, like the Helper does."}
+]

@@ -43,7 +43,11 @@ jobs:
 
       - name: Build the image
         run: |
+          # What's in this update, in plain words (the newest notes from whats-new.json), as a
+          # label PCs can read before downloading: the Updates window lists them.
+          NOTES=$(python3 -c 'import json; print(json.dumps(json.load(open("system_files/usr/share/kantanos/whats-new.json"))[:12], ensure_ascii=False, separators=(",", ":")))')
           sudo podman build \
+            --label "org.kantanos.whats-new=$NOTES" \
             --build-arg KANTAN_VERSION="$KANTAN_VERSION" \
             --build-arg KANTAN_BUILD="$KANTAN_BUILD" \
             --build-arg KANTAN_IMAGE="$KANTAN_IMAGE" \
