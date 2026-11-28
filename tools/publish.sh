@@ -17,6 +17,11 @@ printf 'docker:\n  %s:\n    use-sigstore-attachments: true\n' "$KANTAN_IMAGE" \
 
 VERSION=$(podman run --rm --entrypoint bash "$KANTAN_IMAGE:latest" -c '. /usr/lib/os-release; echo "$KANTAN_VERSION"')
 BUILD=$(podman run --rm --entrypoint bash "$KANTAN_IMAGE:latest" -c '. /usr/lib/os-release; echo "$KANTAN_BUILD"')
+# What's in this update, in plain words: the image's own newest notes (whats-new.json) as a
+# label, so PCs can read them before downloading (the Updates window lists them). A label-only
+# build changes the image's settings, not its contents.
+NOTES=$(podman run --rm --entrypoint python3 "$KANTAN_IMAGE:latest" -c 'import json; print(json.dumps(json.load(open("/usr/share/kantanos/whats-new.json"))[:12], ensure_ascii=False, separators=(",", ":")))')
+echo "FROM $KANTAN_IMAGE:latest" | podman build --label "org.kantanos.whats-new=$NOTES" -t "$KANTAN_IMAGE:latest" -f - .
 PASS=$(mktemp); trap 'rm -f "$PASS"' EXIT   # the key has an empty passphrase
 for tag in "$VERSION-$BUILD" "$VERSION" latest; do
     echo "== pushing $KANTAN_IMAGE:$tag"
