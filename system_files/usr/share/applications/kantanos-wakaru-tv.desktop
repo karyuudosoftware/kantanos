@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Wakaru TV
+Name[ja]=分かるテレビ (Wakaru TV)
+GenericName=Japanese TV with subtitles
+Comment=Japanese shows (TVer) and your own Japanese videos with English subtitles
+Exec=/usr/libexec/kantanos/wakaru-tv
+Icon=/usr/share/kantanos/wakaru/wakaru-tv.png
+Categories=AudioVideo;Video;Player;TV;
+Keywords=wakaru;tver;japan;japanese;subtitles;anime;
+StartupWMClass=Wakaru TV
+Actions=reinstall;
+
+[Desktop Action reinstall]
+Name=Download Wakaru TV again
+Exec=/usr/libexec/kantanos/wakaru-tv --setup

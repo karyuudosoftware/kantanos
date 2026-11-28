@@ -89,6 +89,12 @@ is the owner's call; wait for the sketches before changing anything).
       and show genres, "one show all day", networks, languages). Guide for 3 days, wildcard
       search for channels and shows, favourites, the family's own M3U/XMLTV provider, and
       recordings (one show or every episode) by a background service that keeps the PC awake.
+- [x] **Japanese TV (Wakaru TV):** the family's own app for Japanese shows (TVer) and Japanese
+      videos with English subtitles, written from speech when a show has none. Start-screen tile
+      and menu entry; the first start downloads the pinned Linux build (about 1.2 GB) from
+      github.com/karyuudosoftware/wakaru-tv-releases, checks its SHA-256 and unpacks it into
+      ~/.local/share/kantanos/WakaruTV (`/usr/libexec/kantanos/wakaru-tv`). A newer pin in
+      `/usr/share/kantanos/wakaru/wakaru.json` offers the new version.
 - [x] **Game Mode:** Welcome → Games installs Heroic (Epic, GOG, Amazon) and points to Lutris for
       EA/Ubisoft/Battle.net. **Library sync** (`/usr/libexec/kantanos/games-sync`): installed
       Heroic and Lutris games (and Retro Games once set up) appear in Steam's Game Mode by
@@ -485,6 +491,11 @@ Steps:
       while the desktop is running could still crash before the copy is in place.
       **Install guide note (older PCs):** on ASRock boards HDMI sound needs both "Onboard HD
       Audio" and "Onboard HDMI HD Audio" enabled in the startup settings.
+- [ ] Bigger AI model trial (not urgent): run the Kan-chan fairness test (`tools/kanchan-fairness`)
+      with a 30B-class model split between the graphics card and the PC's memory (for example
+      a "mixture of experts" model such as Qwen3 30B-A3B) and compare with Gemma 3 12B. Swap only
+      if it is clearly better and still quick to answer. Not AirLLM (reads the model from the
+      drive for every word: far too slow for anything a person waits on).
 - [ ] **What's new** screen: after an update that matters, a window opens once and says in plain
       words what changed, what it means for you, and what (if anything) you need to do, for
       example "Some online games with anti-cheat can now run on this PC. You need to do one
@@ -539,6 +550,8 @@ Steps:
       forgotten (backups are already encrypted). Before shipping: health-explaining examples
       in Kan-chan's training and a health test like the fairness one.
 - [ ] Lite edition for small PCs (Azulle Access 3 class). Last in the order of work.
+      AI idea: borrow the main PC's AI over the home network, with a tiny on-device model as
+      the fallback when the main PC is off.
 
 ## Working setup
 

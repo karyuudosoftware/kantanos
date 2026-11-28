@@ -1,0 +1,9 @@
+# Wakaru TV: Japanese TV (TVer) and the family's own Japanese videos with English subtitles.
+[Mode]
+Name=Japanese TV
+Name[ja]=日本のテレビ
+Comment=Japanese shows and videos with English subtitles (Wakaru TV)
+Comment[ja]=日本の番組と動画を英語字幕で (Wakaru TV)
+Icon=/usr/share/kantanos/wakaru/wakaru-tv.png
+Exec=/usr/libexec/kantanos/wakaru-tv
+Order=25

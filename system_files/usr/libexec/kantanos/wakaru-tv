@@ -1,0 +1,319 @@
+#!/usr/bin/python3
+"""KantanOS: Wakaru TV, Japanese TV (TVer) and the family's own Japanese videos with English subtitles,
+including subtitles written from speech when a show has none. Made by the family (karyuudosoftware).
+
+The first time, a window downloads the pinned Linux build (/usr/share/kantanos/wakaru/wakaru.json,
+about 1.2 GB with its speech models), checks it against its SHA-256 and unpacks it into
+~/.local/share/kantanos/WakaruTV. After that this simply starts it. When a KantanOS update pins a
+newer Wakaru TV, the window offers the new one (the old one keeps working until then).
+
+  wakaru-tv             start Wakaru TV, or download it first
+  wakaru-tv --setup     download it again
+  wakaru-tv --self-test
+"""
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import urllib.request
+
+PIN = "/usr/share/kantanos/wakaru/wakaru.json"
+ICON = "/usr/share/kantanos/wakaru/wakaru-tv.png"
+HOME = os.path.expanduser("~")
+DATA = os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local", "share")
+BASE = os.path.join(DATA, "kantanos")
+APP = os.path.join(BASE, "WakaruTV")
+VERSION_FILE = os.path.join(APP, ".kantanos-version")
+
+
+def pin():
+    with open(PIN, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def installed_version():
+    try:
+        with open(VERSION_FILE, encoding="utf-8") as f:
+            v = f.read().strip()
+        return v if os.access(os.path.join(APP, "wakaru-tv.sh"), os.X_OK) else ""
+    except OSError:
+        return ""
+
+
+def sha256_of(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def download(p, progress=lambda done, total: None):
+    """Downloads the pinned build into ~/.local/share/kantanos, going on from where an earlier
+    try stopped. Refuses it unless the SHA-256 matches. Returns its path."""
+    os.makedirs(BASE, exist_ok=True)
+    part = os.path.join(BASE, os.path.basename(p["url"]) + ".part")
+    total = int(p.get("size") or 0)
+    have = os.path.getsize(part) if os.path.exists(part) else 0
+    if total and have > total:
+        os.remove(part)
+        have = 0
+    if not total or have < total:
+        headers = {"User-Agent": "KantanOS-wakaru-tv"}
+        if have:
+            headers["Range"] = f"bytes={have}-"
+        req = urllib.request.Request(p["url"], headers=headers)
+        with urllib.request.urlopen(req, timeout=60) as r:
+            if have and r.status != 206:             # the server started again from the beginning
+                have = 0
+            total = total or have + int(r.headers.get("Content-Length") or 0)
+            with open(part, "ab" if have else "wb") as f:
+                done = have
+                while True:
+                    block = r.read(1 << 18)
+                    if not block:
+                        break
+                    f.write(block)
+                    done += len(block)
+                    progress(done, total)
+    if sha256_of(part) != p["sha256"]:
+        os.remove(part)
+        raise RuntimeError("the downloaded file didn't match the expected one, so it wasn't kept. Try again.")
+    return part
+
+
+def unpack(archive, version):
+    """Unpacks into a new folder next to the old one, then swaps them, so a half-unpacked copy is
+    never started."""
+    new = APP + ".new"
+    shutil.rmtree(new, ignore_errors=True)
+    os.makedirs(new)
+    with tarfile.open(archive) as t:
+        for m in t.getmembers():
+            name = m.name.split("/", 1)[1] if "/" in m.name else ""
+            if not name or m.issym() or m.islnk() or name.startswith("/") or ".." in name.split("/"):
+                continue                              # only plain files and folders inside WakaruTV/
+            m.name = name
+            t.extract(m, new, filter="data" if hasattr(tarfile, "data_filter") else None)
+    for f in ("wakaru-tv", "wakaru-tv.sh", "install-menu-entry.sh", "chrome_crashpad_handler",
+              "resources/core/WakaruCore", "resources/core/ffmpeg"):
+        if os.path.exists(os.path.join(new, f)):
+            os.chmod(os.path.join(new, f), 0o755)
+    with open(os.path.join(new, ".kantanos-version"), "w", encoding="utf-8") as f:
+        f.write(version + "\n")
+    old = APP + ".old"
+    shutil.rmtree(old, ignore_errors=True)
+    if os.path.exists(APP):
+        os.rename(APP, old)
+    os.rename(new, APP)
+    shutil.rmtree(old, ignore_errors=True)
+    os.remove(archive)
+    hide_own_menu_entry()
+
+
+def hide_own_menu_entry():
+    """Wakaru TV's starter adds its own menu entry unless one already points at it. KantanOS has
+    its own (kantanos-wakaru-tv.desktop), so this leaves a hidden one in its place."""
+    apps = os.path.join(DATA, "applications")
+    os.makedirs(apps, exist_ok=True)
+    with open(os.path.join(apps, "wakaru-tv.desktop"), "w", encoding="utf-8") as f:
+        f.write("[Desktop Entry]\nType=Application\nName=Wakaru TV\n"
+                f"Exec=\"{os.path.realpath(APP)}/wakaru-tv.sh\" %U\nNoDisplay=true\n")   # (/home is /var/home)
+
+
+def start():
+    hide_own_menu_entry()
+    sh = os.path.join(APP, "wakaru-tv.sh")
+    os.execv(sh, [sh] + [a for a in sys.argv[1:] if not a.startswith("--setup")])
+
+
+# ---- the download window ----------------------------------------------------------------------
+def setup_window(p, update=False):
+    import threading
+
+    from PySide6.QtCore import QObject, Qt, Signal
+    from PySide6.QtGui import QFont, QIcon
+    from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget
+
+    class Bridge(QObject):
+        """Lives on the window's thread: the work thread only emits these."""
+        step = Signal(str)
+        percent = Signal(int)
+        finished = Signal(str)                      # error, or "" when it's ready
+
+    def work(bridge):
+        try:
+            bridge.step.emit("Downloading Wakaru TV (about 1.2 GB with its speech models)…")
+            mb = lambda n: f"{n / 1048576:,.0f} MB"
+            part = download(p, lambda d, t: (bridge.percent.emit(int(d * 100 / t) if t else 0),
+                                             bridge.step.emit(f"Downloading Wakaru TV: {mb(d)} of {mb(t)}…")))
+            bridge.percent.emit(100)
+            bridge.step.emit("Checking and unpacking it…")
+            unpack(part, p["version"])
+            bridge.finished.emit("")
+        except Exception as e:                      # noqa: BLE001 - shown to the person
+            bridge.finished.emit(str(e))
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setDesktopFileName("kantanos-wakaru-tv")
+    w = QWidget()
+    w.setWindowTitle("Wakaru TV")
+    w.setWindowIcon(QIcon(ICON))
+    f = w.font()
+    f.setPointSizeF(f.pointSizeF() * 1.3)
+    w.setFont(f)
+    lay = QVBoxLayout(w)
+    lay.setContentsMargins(48, 36, 48, 30)
+    lay.setSpacing(14)
+    head = QLabel("Wakaru TV: a new version is ready" if update else "Wakaru TV: Japanese TV with English subtitles")
+    hf = QFont(w.font())
+    hf.setPointSizeF(hf.pointSizeF() * 1.6)
+    hf.setBold(True)
+    head.setFont(hf)
+    lay.addWidget(head)
+    intro = QLabel(
+        "Watch Japanese shows from <b>TVer</b> and your own Japanese videos with English subtitles. When a "
+        "show has no subtitles, Wakaru TV listens ahead of you and writes them from what is said.<br><br>"
+        + ("Download the new version now? The one you have keeps working if you'd rather wait." if update else
+           "It's downloaded once (about 1.2 GB, so Wi-Fi or a cable is best). If it's stopped, it goes on from "
+           "where it was next time.")
+        + "<br><br>TVer only plays in Japan: connect a VPN to a Japanese server first. For English subtitles, paste "
+          "a DeepL key in Wakaru TV's Settings → Translation.")
+    intro.setWordWrap(True)
+    intro.setTextFormat(Qt.TextFormat.RichText)
+    lay.addWidget(intro)
+    status = QLabel("")
+    status.setWordWrap(True)
+    bar = QProgressBar()
+    bar.setRange(0, 100)
+    bar.hide()
+    lay.addWidget(status)
+    lay.addWidget(bar)
+    lay.addStretch(1)
+    row = QHBoxLayout()
+    old = QPushButton(QIcon.fromTheme("media-playback-start"), "Start the one I have")
+    old.setVisible(update)
+    close = QPushButton(QIcon.fromTheme("window-close"), "Close")
+    close.clicked.connect(w.close)
+    go = QPushButton(QIcon.fromTheme("download"), "Download")
+    go.setDefault(True)
+    row.addWidget(old)
+    row.addStretch(1)
+    row.addWidget(close)
+    row.addWidget(go)
+    lay.addLayout(row)
+    lay.addWidget(QLabel(f"<small>Wakaru TV {p['version']} · made by the family · downloads: "
+                         "<a href='https://github.com/karyuudosoftware/wakaru-tv-releases'>"
+                         "github.com/karyuudosoftware/wakaru-tv-releases</a></small>", openExternalLinks=True))
+    bridge = Bridge(w)
+    bridge.step.connect(status.setText)
+    bridge.percent.connect(lambda v: (bar.show(), bar.setValue(v)))
+
+    def launch():
+        w.launch = True
+        w.close()
+        app.quit()
+
+    def done(err):
+        if err:
+            bar.hide()
+            status.setText(f"<b>Something went wrong:</b> {err}<br>Is the internet connected? Press Download to try again.")
+            go.setEnabled(True)
+            go.setText("Download")
+            return
+        bar.hide()
+        status.setText("<b>All set.</b>")
+        launch()                                    # straight into Wakaru TV
+
+    def begin():
+        go.setEnabled(False)
+        old.setEnabled(False)
+        go.setText("Working…")
+        bar.setValue(0)
+        threading.Thread(target=work, args=(bridge,), daemon=True).start()
+
+    bridge.finished.connect(done)
+    go.clicked.connect(begin)
+    old.clicked.connect(launch)
+    w.status, w.launch, w.begin = status, False, begin
+    w.resize(1000, 560)
+    w.show()
+    return app, w
+
+
+def self_test():
+    p = pin()
+    assert len(p["sha256"]) == 64 and p["url"].startswith("https://github.com/karyuudosoftware/wakaru-tv-releases/")
+    assert p["url"].endswith("-linux-x64.tar.gz") and p["size"] > 100_000_000 and os.path.isfile(ICON)
+    global BASE, APP, VERSION_FILE, DATA
+    tmp = tempfile.mkdtemp()
+    try:
+        DATA = os.path.join(tmp, "data")
+        BASE = os.path.join(DATA, "kantanos")
+        APP = os.path.join(BASE, "WakaruTV")
+        VERSION_FILE = os.path.join(APP, ".kantanos-version")
+        os.makedirs(BASE)
+        # a small stand-in for the download: WakaruTV/wakaru-tv.sh, plus an entry that must be skipped
+        src = os.path.join(tmp, "src", "WakaruTV")
+        os.makedirs(os.path.join(src, "resources", "core"))
+        with open(os.path.join(src, "wakaru-tv.sh"), "w") as f:
+            f.write("#!/bin/sh\necho started\n")
+        with open(os.path.join(src, "resources", "core", "WakaruCore"), "w") as f:
+            f.write("x")
+        arc = os.path.join(BASE, "t.tar.gz")
+        with tarfile.open(arc, "w:gz") as t:
+            t.add(src, "WakaruTV")
+            evil = tarfile.TarInfo("WakaruTV/../../escape")
+            evil.size = 1
+            import io
+            t.addfile(evil, io.BytesIO(b"x"))
+        assert installed_version() == ""
+        unpack(arc, "9.9.9")
+        assert installed_version() == "9.9.9"
+        assert os.access(os.path.join(APP, "resources", "core", "WakaruCore"), os.X_OK)
+        assert not os.path.exists(os.path.join(DATA, "escape")) and not os.path.exists(os.path.join(tmp, "escape"))
+        assert "NoDisplay=true" in open(os.path.join(DATA, "applications", "wakaru-tv.desktop")).read()
+        # a file that doesn't match is refused
+        fake = dict(p, url="file://" + arc, sha256="0" * 64, size=0)
+        with open(arc, "wb") as f:
+            f.write(b"kantan")
+        part = os.path.join(BASE, "t.tar.gz.part")
+        try:
+            download(fake)
+            raise AssertionError("a wrong file was kept")
+        except RuntimeError:
+            assert not os.path.exists(part)
+        good = dict(fake, sha256=hashlib.sha256(b"kantan").hexdigest())
+        assert sha256_of(download(good)) == good["sha256"]
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        app, w = setup_window(p, update=True)
+        assert w.windowTitle() == "Wakaru TV" and "new version" in "".join(
+            l.text() for l in w.findChildren(type(w.status)))
+        w.close()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    print("wakaru-tv self-test ok")
+
+
+def main():
+    args = sys.argv[1:]
+    if "--self-test" in args:
+        self_test()
+        return 0
+    p = pin()
+    have = installed_version()
+    if have == p["version"] and "--setup" not in args:
+        start()
+    app, w = setup_window(p, update=bool(have) and have != p["version"] and "--setup" not in args)
+    code = app.exec()
+    if w.launch and installed_version():
+        start()
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())
